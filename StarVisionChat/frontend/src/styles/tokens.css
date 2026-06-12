@@ -1,0 +1,354 @@
+/*
+ * StarVisionChat - Design Tokens
+ * Based on Starlore Design System
+ * 多主题系统 + 玻璃效果 + 深空美学
+ */
+
+/* ============================================
+   Theme: Default (暖白 - 温暖文学气质)
+   ============================================ */
+[data-theme="default"],
+:root {
+  /* 画布 */
+  --canvas: #FFFCF7;
+  --canvas-deep: #F8F3EC;
+
+  /* 背景光晕 */
+  --orb-1: rgba(232, 93, 42, 0.08);
+  --orb-2: rgba(255, 180, 120, 0.06);
+  --orb-3: rgba(200, 160, 140, 0.05);
+  --orb-glow: rgba(232, 93, 42, 0.15);
+
+  /* 文字层级 */
+  --ink: #1A1410;
+  --ink-soft: #4A4038;
+  --ink-muted: #8A7E74;
+
+  /* 强调色 */
+  --accent: #E85D2A;
+  --accent-hover: #D04A1A;
+  --accent-soft: rgba(232, 93, 42, 0.1);
+
+  /* 暖色辅助 */
+  --warm: #E8A860;
+  --warm-soft: rgba(232, 168, 96, 0.1);
+
+  /* 表面 */
+  --surface: rgba(255, 252, 247, 0.85);
+  --surface-hover: rgba(255, 252, 247, 0.95);
+
+  /* 边框 */
+  --border: rgba(26, 20, 16, 0.08);
+  --border-interactive: rgba(26, 20, 16, 0.15);
+  --border-focus: rgba(232, 93, 42, 0.4);
+
+  /* 标签/徽章 */
+  --tag-bg: rgba(232, 93, 42, 0.08);
+  --tag-hover: rgba(232, 93, 42, 0.15);
+  --badge-bg: rgba(232, 93, 42, 0.1);
+  --badge-border: rgba(232, 93, 42, 0.2);
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 3px rgba(26, 20, 16, 0.06);
+  --shadow-card: 0 4px 16px rgba(26, 20, 16, 0.08);
+  --shadow-card-hover: 0 8px 32px rgba(26, 20, 16, 0.12);
+  --shadow-nav: 0 4px 24px rgba(26, 20, 16, 0.1);
+  --shadow-button: 0 2px 8px rgba(232, 93, 42, 0.2);
+  --shadow-button-hover: 0 4px 16px rgba(232, 93, 42, 0.3);
+
+  /* 玻璃效果 */
+  --glass-base: rgba(255, 252, 247, 0.05);
+  --glass-mid: rgba(255, 252, 247, 0.08);
+  --glass-top: rgba(255, 252, 247, 0.11);
+  --glass-bright: rgba(255, 252, 247, 0.16);
+  --glass-border: rgba(26, 20, 16, 0.08);
+}
+
+/* ============================================
+   Theme: White (纯灰 - 极简素净)
+   ============================================ */
+[data-theme="white"] {
+  --canvas: #F5F5F5;
+  --canvas-deep: #EBEBEB;
+
+  --orb-1: rgba(51, 51, 51, 0.05);
+  --orb-2: rgba(100, 100, 100, 0.04);
+  --orb-3: rgba(150, 150, 150, 0.03);
+  --orb-glow: rgba(51, 51, 51, 0.1);
+
+  --ink: #1A1A1A;
+  --ink-soft: #4A4A4A;
+  --ink-muted: #8A8A8A;
+
+  --accent: #333333;
+  --accent-hover: #222222;
+  --accent-soft: rgba(51, 51, 51, 0.1);
+
+  --warm: #666666;
+  --warm-soft: rgba(102, 102, 102, 0.1);
+
+  --surface: rgba(245, 245, 245, 0.85);
+  --surface-hover: rgba(245, 245, 245, 0.95);
+
+  --border: rgba(26, 26, 26, 0.08);
+  --border-interactive: rgba(26, 26, 26, 0.15);
+  --border-focus: rgba(51, 51, 51, 0.4);
+
+  --tag-bg: rgba(51, 51, 51, 0.08);
+  --tag-hover: rgba(51, 51, 51, 0.15);
+  --badge-bg: rgba(51, 51, 51, 0.1);
+  --badge-border: rgba(51, 51, 51, 0.2);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.06);
+  --shadow-card-hover: 0 8px 32px rgba(0, 0, 0, 0.1);
+  --shadow-nav: 0 4px 24px rgba(0, 0, 0, 0.08);
+  --shadow-button: 0 2px 8px rgba(0, 0, 0, 0.15);
+  --shadow-button-hover: 0 4px 16px rgba(0, 0, 0, 0.2);
+
+  --glass-base: rgba(245, 245, 245, 0.05);
+  --glass-mid: rgba(245, 245, 245, 0.08);
+  --glass-top: rgba(245, 245, 245, 0.11);
+  --glass-bright: rgba(245, 245, 245, 0.16);
+  --glass-border: rgba(26, 26, 26, 0.08);
+}
+
+/* ============================================
+   Theme: Dark (深空 - 深邃科幻)
+   ============================================ */
+[data-theme="dark"] {
+  --canvas: #0F1117;
+  --canvas-deep: #080A0F;
+
+  --orb-1: rgba(123, 154, 255, 0.08);
+  --orb-2: rgba(100, 200, 255, 0.06);
+  --orb-3: rgba(180, 100, 255, 0.05);
+  --orb-glow: rgba(123, 154, 255, 0.2);
+
+  --ink: #F0F0F2;
+  --ink-soft: #B8B8C0;
+  --ink-muted: #6A6A78;
+
+  --accent: #7B9AFF;
+  --accent-hover: #92ACFF;
+  --accent-soft: rgba(123, 154, 255, 0.15);
+
+  --warm: #FF9E7B;
+  --warm-soft: rgba(255, 158, 123, 0.1);
+
+  --surface: rgba(15, 17, 23, 0.85);
+  --surface-hover: rgba(15, 17, 23, 0.95);
+
+  --border: rgba(240, 240, 242, 0.08);
+  --border-interactive: rgba(240, 240, 242, 0.15);
+  --border-focus: rgba(123, 154, 255, 0.5);
+
+  --tag-bg: rgba(123, 154, 255, 0.12);
+  --tag-hover: rgba(123, 154, 255, 0.2);
+  --badge-bg: rgba(123, 154, 255, 0.15);
+  --badge-border: rgba(123, 154, 255, 0.3);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-card: 0 8px 20px rgba(0, 0, 0, 0.23), 0 20px 40px rgba(0, 0, 0, 0.12);
+  --shadow-card-hover: 0 12px 32px rgba(0, 0, 0, 0.3), 0 24px 48px rgba(0, 0, 0, 0.18);
+  --shadow-nav: 0 4px 24px rgba(0, 0, 0, 0.4);
+  --shadow-button: 0 2px 12px rgba(123, 154, 255, 0.3);
+  --shadow-button-hover: 0 4px 20px rgba(123, 154, 255, 0.45);
+
+  --glass-base: rgba(255, 255, 255, 0.03);
+  --glass-mid: rgba(255, 255, 255, 0.06);
+  --glass-top: rgba(255, 255, 255, 0.09);
+  --glass-bright: rgba(255, 255, 255, 0.14);
+  --glass-border: rgba(255, 255, 255, 0.08);
+}
+
+/* ============================================
+   Theme: Green (薄荷 - 自然清新)
+   ============================================ */
+[data-theme="green"] {
+  --canvas: #F0F7EE;
+  --canvas-deep: #E4F0E0;
+
+  --orb-1: rgba(74, 140, 92, 0.08);
+  --orb-2: rgba(120, 180, 100, 0.06);
+  --orb-3: rgba(60, 120, 80, 0.05);
+  --orb-glow: rgba(74, 140, 92, 0.15);
+
+  --ink: #1A3A2D;
+  --ink-soft: #3A5A4A;
+  --ink-muted: #6A8A7A;
+
+  --accent: #4A8C5C;
+  --accent-hover: #3A7A4C;
+  --accent-soft: rgba(74, 140, 92, 0.1);
+
+  --warm: #7BC08A;
+  --warm-soft: rgba(123, 192, 138, 0.1);
+
+  --surface: rgba(240, 247, 238, 0.85);
+  --surface-hover: rgba(240, 247, 238, 0.95);
+
+  --border: rgba(26, 58, 45, 0.08);
+  --border-interactive: rgba(26, 58, 45, 0.15);
+  --border-focus: rgba(74, 140, 92, 0.4);
+
+  --tag-bg: rgba(74, 140, 92, 0.08);
+  --tag-hover: rgba(74, 140, 92, 0.15);
+  --badge-bg: rgba(74, 140, 92, 0.1);
+  --badge-border: rgba(74, 140, 92, 0.2);
+
+  --shadow-sm: 0 1px 3px rgba(26, 58, 45, 0.06);
+  --shadow-card: 0 4px 16px rgba(26, 58, 45, 0.08);
+  --shadow-card-hover: 0 8px 32px rgba(26, 58, 45, 0.12);
+  --shadow-nav: 0 4px 24px rgba(26, 58, 45, 0.1);
+  --shadow-button: 0 2px 8px rgba(74, 140, 92, 0.2);
+  --shadow-button-hover: 0 4px 16px rgba(74, 140, 92, 0.3);
+
+  --glass-base: rgba(240, 247, 238, 0.05);
+  --glass-mid: rgba(240, 247, 238, 0.08);
+  --glass-top: rgba(240, 247, 238, 0.11);
+  --glass-bright: rgba(240, 247, 238, 0.16);
+  --glass-border: rgba(26, 58, 45, 0.08);
+}
+
+/* ============================================
+   Theme: Blue (浅海 - 海洋沉静)
+   ============================================ */
+[data-theme="blue"] {
+  --canvas: #EEF3F8;
+  --canvas-deep: #E0E8F0;
+
+  --orb-1: rgba(59, 125, 216, 0.08);
+  --orb-2: rgba(100, 160, 240, 0.06);
+  --orb-3: rgba(80, 100, 180, 0.05);
+  --orb-glow: rgba(59, 125, 216, 0.15);
+
+  --ink: #1A2A3E;
+  --ink-soft: #3A4A60;
+  --ink-muted: #6A7A90;
+
+  --accent: #3B7DD8;
+  --accent-hover: #2A6CC0;
+  --accent-soft: rgba(59, 125, 216, 0.1);
+
+  --warm: #6BA0E0;
+  --warm-soft: rgba(107, 160, 224, 0.1);
+
+  --surface: rgba(238, 243, 248, 0.85);
+  --surface-hover: rgba(238, 243, 248, 0.95);
+
+  --border: rgba(26, 42, 62, 0.08);
+  --border-interactive: rgba(26, 42, 62, 0.15);
+  --border-focus: rgba(59, 125, 216, 0.4);
+
+  --tag-bg: rgba(59, 125, 216, 0.08);
+  --tag-hover: rgba(59, 125, 216, 0.15);
+  --badge-bg: rgba(59, 125, 216, 0.1);
+  --badge-border: rgba(59, 125, 216, 0.2);
+
+  --shadow-sm: 0 1px 3px rgba(26, 42, 62, 0.06);
+  --shadow-card: 0 4px 16px rgba(26, 42, 62, 0.08);
+  --shadow-card-hover: 0 8px 32px rgba(26, 42, 62, 0.12);
+  --shadow-nav: 0 4px 24px rgba(26, 42, 62, 0.1);
+  --shadow-button: 0 2px 8px rgba(59, 125, 216, 0.2);
+  --shadow-button-hover: 0 4px 16px rgba(59, 125, 216, 0.3);
+
+  --glass-base: rgba(238, 243, 248, 0.05);
+  --glass-mid: rgba(238, 243, 248, 0.08);
+  --glass-top: rgba(238, 243, 248, 0.11);
+  --glass-bright: rgba(238, 243, 248, 0.16);
+  --glass-border: rgba(26, 42, 62, 0.08);
+}
+
+/* ============================================
+   Theme: Pink (裸粉 - 柔美浪漫)
+   ============================================ */
+[data-theme="pink"] {
+  --canvas: #FDF2F6;
+  --canvas-deep: #F8E4EC;
+
+  --orb-1: rgba(212, 99, 143, 0.08);
+  --orb-2: rgba(240, 150, 180, 0.06);
+  --orb-3: rgba(180, 100, 140, 0.05);
+  --orb-glow: rgba(212, 99, 143, 0.15);
+
+  --ink: #2D1B24;
+  --ink-soft: #5A3A4A;
+  --ink-muted: #8A6A7A;
+
+  --accent: #D4638F;
+  --accent-hover: #C0507A;
+  --accent-soft: rgba(212, 99, 143, 0.1);
+
+  --warm: #E89AB0;
+  --warm-soft: rgba(232, 154, 176, 0.1);
+
+  --surface: rgba(253, 242, 246, 0.85);
+  --surface-hover: rgba(253, 242, 246, 0.95);
+
+  --border: rgba(45, 27, 36, 0.08);
+  --border-interactive: rgba(45, 27, 36, 0.15);
+  --border-focus: rgba(212, 99, 143, 0.4);
+
+  --tag-bg: rgba(212, 99, 143, 0.08);
+  --tag-hover: rgba(212, 99, 143, 0.15);
+  --badge-bg: rgba(212, 99, 143, 0.1);
+  --badge-border: rgba(212, 99, 143, 0.2);
+
+  --shadow-sm: 0 1px 3px rgba(45, 27, 36, 0.06);
+  --shadow-card: 0 4px 16px rgba(45, 27, 36, 0.08);
+  --shadow-card-hover: 0 8px 32px rgba(45, 27, 36, 0.12);
+  --shadow-nav: 0 4px 24px rgba(45, 27, 36, 0.1);
+  --shadow-button: 0 2px 8px rgba(212, 99, 143, 0.2);
+  --shadow-button-hover: 0 4px 16px rgba(212, 99, 143, 0.3);
+
+  --glass-base: rgba(253, 242, 246, 0.05);
+  --glass-mid: rgba(253, 242, 246, 0.08);
+  --glass-top: rgba(253, 242, 246, 0.11);
+  --glass-bright: rgba(253, 242, 246, 0.16);
+  --glass-border: rgba(45, 27, 36, 0.08);
+}
+
+/* ============================================
+   通用设计令牌
+   ============================================ */
+
+/* 圆角 */
+:root {
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --radius-full: 9999px;
+}
+
+/* 过渡 */
+:root {
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --transition: 0.25s var(--ease-out-quart);
+  --transition-slow: 0.5s var(--ease-out-quart);
+}
+
+/* 间距阶梯 */
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --space-9: 96px;
+}
+
+/* 字体大小阶梯 */
+:root {
+  --text-display: clamp(2rem, 4vw, 2.8rem);
+  --text-h1: 24px;
+  --text-h2: 20px;
+  --text-h3: 16px;
+  --text-body: 15px;
+  --text-body-small: 13px;
+  --text-caption: 12px;
+}
