@@ -42,6 +42,56 @@ const chatStore = useChatStore();
 const sessionStore = useSessionStore();
 const showSessionList = ref(false);
 
+/* ─── Model provider ─── */
+const modelProvider = ref('mimo')  // mimo / qwen
+let qwenImageInterval = null  // Qwen 模式下的图像发送定时器
+
+// Load model provider from config
+function loadModelProvider() {
+  const saved = localStorage.getItem('starvisionchat_config')
+  if (saved) {
+    try {
+      const config = JSON.parse(saved)
+      const newProvider = config.modelProvider || 'mimo'
+      if (newProvider !== modelProvider.value) {
+        modelProvider.value = newProvider
+        // 切换模型时更新图像流
+        updateQwenImageStream()
+      }
+    } catch { /* ignore */ }
+  }
+}
+
+// Qwen 模式下持续发送图像帧（每秒 1 帧）
+function updateQwenImageStream() {
+  // 清除现有定时器
+  if (qwenImageInterval) {
+    clearInterval(qwenImageInterval)
+    qwenImageInterval = null
+  }
+
+  // 如果是 Qwen 模式且摄像头开启，开始发送图像
+  if (modelProvider.value === 'qwen' && isCameraOn.value) {
+    qwenImageInterval = setInterval(() => {
+      const frame = captureFrame()
+      if (frame) {
+        wsService.send('image_stream', { image: frame })
+      }
+    }, 1000)  // 每秒 1 帧
+  }
+}
+
+onMounted(() => {
+  loadModelProvider()
+
+  // 监听配置更新事件（从设置面板触发）
+  window.addEventListener('config-updated', loadModelProvider)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('config-updated', loadModelProvider)
+})
+
 const {
   ttsEnabled,
   isSpeaking: isTTSSpeaking,
@@ -74,10 +124,17 @@ const cameraLoading = ref(false);
 async function toggleCamera() {
   if (isCameraOn.value) {
     stopCameraFn();
+    // 停止 Qwen 图像流
+    if (qwenImageInterval) {
+      clearInterval(qwenImageInterval)
+      qwenImageInterval = null
+    }
   } else {
     cameraLoading.value = true;
     await initCamera();
     cameraLoading.value = false;
+    // 启动 Qwen 图像流（如果是 Qwen 模式）
+    updateQwenImageStream()
   }
 }
 
@@ -164,6 +221,15 @@ async function toggleVoice() {
     return;
   if (!speechSupported.value) return;
 
+  // 重新加载模型配置（可能在设置面板中被修改）
+  const saved = localStorage.getItem('starvisionchat_config')
+  if (saved) {
+    try {
+      const config = JSON.parse(saved)
+      modelProvider.value = config.modelProvider || 'mimo'
+    } catch { /* ignore */ }
+  }
+
   if (currentMode.value !== "listening") {
     abortCtrl?.abort();
     setMode("listening");
@@ -212,7 +278,15 @@ async function startRecording() {
         return;
       }
       const audioBlob = new Blob(audioChunks, { type: recordingMimeType });
-      await sendVoiceAudio(audioBlob);
+
+      // 根据模型选择使用不同的发送方式
+      if (modelProvider.value === 'qwen') {
+        // Qwen 模式：流式发送音频
+        await streamAudioToQwen(audioBlob);
+      } else {
+        // MiMo 模式：录音结束后一次性发送
+        await sendVoiceAudio(audioBlob);
+      }
     };
 
     mediaRecorder.onerror = () => {
@@ -336,6 +410,46 @@ async function sendVoiceAudio(audioBlob) {
   }
 }
 
+/** Stream audio in real-time for Qwen mode */
+async function streamAudioToQwen(audioBlob) {
+  try {
+    // 转换为 16kHz PCM 格式（Qwen 要求）
+    const pcm16k = await convertToPcm16k(audioBlob)
+    const b64 = arrayBufToB64(pcm16k)
+
+    // 流式发送音频到 Qwen
+    wsService.send('audio_stream', { audio: b64 })
+
+    // 捕获并发送当前摄像头帧
+    const frame = captureFrame()
+    if (frame) {
+      wsService.send('image_stream', { image: frame })
+    }
+  } catch (e) {
+    console.error('Qwen audio stream error:', e)
+  }
+}
+
+/** 转换音频为 16kHz PCM16 格式（Qwen 要求） */
+async function convertToPcm16k(audioBlob) {
+  const ctx = new AudioContext({ sampleRate: 16000 })
+  try {
+    const buf = await ctx.decodeAudioData(await audioBlob.arrayBuffer())
+    const ch = buf.getChannelData(0) // 单声道
+
+    // PCM16 编码
+    const pcm = new ArrayBuffer(ch.length * 2)
+    const view = new DataView(pcm)
+    for (let i = 0; i < ch.length; i++) {
+      const s = Math.max(-1, Math.min(1, ch[i]))
+      view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+    }
+    return pcm
+  } finally {
+    ctx.close()
+  }
+}
+
 /* ─── Session Management ─── */
 function createNewSession() {
   sessionStore.createSession()
@@ -435,6 +549,94 @@ function handleAIAudio(data) {
   } catch (e) {
     console.error("Failed to play AI audio:", e);
   }
+}
+
+/* ─── Qwen Realtime Handlers ─── */
+let qwenAudioContext = null;
+let qwenAudioQueue = [];
+let qwenIsPlaying = false;
+
+function handleQwenTextDelta(data) {
+  // 流式追加文本到当前 AI 回复
+  const text = data.text || "";
+  if (!text) return;
+
+  // 找到最后一条 AI 消息并追加
+  const messages = chatStore.messages;
+  const lastMsg = messages[messages.length - 1];
+  if (lastMsg && !lastMsg.isUser) {
+    lastMsg.text += text;
+  } else {
+    chatStore.addMessage(text, false);
+  }
+}
+
+function handleQwenAudioDelta(data) {
+  // 接收 Qwen 音频流（base64 PCM16 24kHz）
+  const audioBase64 = data.audio;
+  if (!audioBase64) return;
+
+  try {
+    const binaryStr = atob(audioBase64);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+
+    // PCM16 24kHz → float32
+    const float32 = new Float32Array(bytes.length / 2);
+    for (let i = 0; i < float32.length; i++) {
+      const int16 = (bytes[i * 2 + 1] << 8) | bytes[i * 2];
+      float32[i] = (int16 < 32768 ? int16 : int16 - 65536) / 32768;
+    }
+
+    qwenAudioQueue.push(float32);
+    if (!qwenIsPlaying) {
+      playQwenAudioQueue();
+    }
+  } catch (e) {
+    console.error("Qwen audio decode error:", e);
+  }
+}
+
+function playQwenAudioQueue() {
+  if (qwenAudioQueue.length === 0) {
+    qwenIsPlaying = false;
+    setMode("idle");
+    return;
+  }
+
+  qwenIsPlaying = true;
+  setMode("speaking");
+
+  if (!qwenAudioContext) {
+    qwenAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+  }
+
+  const float32 = qwenAudioQueue.shift();
+  const buffer = qwenAudioContext.createBuffer(1, float32.length, 24000);
+  buffer.getChannelData(0).set(float32);
+
+  const source = qwenAudioContext.createBufferSource();
+  source.buffer = buffer;
+  source.connect(qwenAudioContext.destination);
+  source.onended = () => playQwenAudioQueue();
+  source.start();
+}
+
+function handleQwenTranscript(data) {
+  // 用户语音转录完成
+  const text = data.text || "";
+  if (text) {
+    chatStore.addMessage(text, true);
+    scrollChat();
+  }
+}
+
+function handleQwenResponseDone() {
+  // Qwen 响应完成
+  qwenIsPlaying = false;
+  setMode("idle");
 }
 
 function typewriterEffect(text) {
@@ -967,8 +1169,10 @@ onMounted(() => {
   initSpeech();
 
   // 自动开启摄像头（让用户可以立即与 AI 视觉交互）
-  setTimeout(() => {
-    initCamera()
+  setTimeout(async () => {
+    await initCamera()
+    // 启动 Qwen 图像流（如果是 Qwen 模式）
+    updateQwenImageStream()
   }, 500)
 
   // Listen for theme changes
@@ -981,6 +1185,12 @@ onMounted(() => {
   wsService.on("ai_response", handleAIResponse);
   wsService.on("ai_audio", handleAIAudio);
   wsService.on("status", handleStatus);
+
+  // Qwen realtime listeners
+  wsService.on("qwen_text_delta", handleQwenTextDelta);
+  wsService.on("qwen_audio_delta", handleQwenAudioDelta);
+  wsService.on("qwen_transcript", handleQwenTranscript);
+  wsService.on("qwen_response_done", handleQwenResponseDone);
 });
 
 onBeforeUnmount(() => {
@@ -1002,6 +1212,24 @@ onBeforeUnmount(() => {
   // Remove WebSocket listeners
   wsService.off("ai_response", handleAIResponse);
   wsService.off("status", handleStatus);
+
+  // Qwen listeners cleanup
+  wsService.off("qwen_text_delta", handleQwenTextDelta);
+  wsService.off("qwen_audio_delta", handleQwenAudioDelta);
+  wsService.off("qwen_transcript", handleQwenTranscript);
+  wsService.off("qwen_response_done", handleQwenResponseDone);
+
+  // Qwen audio cleanup
+  if (qwenAudioContext) {
+    qwenAudioContext.close();
+    qwenAudioContext = null;
+  }
+
+  // Qwen image stream cleanup
+  if (qwenImageInterval) {
+    clearInterval(qwenImageInterval)
+    qwenImageInterval = null
+  }
 });
 
 watch(
@@ -1036,6 +1264,9 @@ watch(
       <div class="top-brand">
         <el-icon :size="18" color="var(--accent)"><Star /></el-icon>
         <span class="top-brand-name">StarVision</span>
+        <span class="model-badge" :class="modelProvider">
+          {{ modelProvider === 'qwen' ? 'Qwen' : 'MiMo' }}
+        </span>
       </div>
       <div class="top-actions">
         <!-- Theme dots -->
@@ -1349,6 +1580,25 @@ watch(
   font-weight: 700;
   color: var(--ink);
   letter-spacing: 0.5px;
+}
+
+.model-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.model-badge.mimo {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.model-badge.qwen {
+  background: rgba(59, 125, 216, 0.15);
+  color: #3B7DD8;
 }
 
 .top-actions {
