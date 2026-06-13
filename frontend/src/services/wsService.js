@@ -92,17 +92,25 @@ class WSService {
   }
 
   /**
-   * 发送音频结束信号
+   * 发送音频结束信号（可选附带图像帧）
    */
-  sendAudioEnd() {
-    this.send('audio_end')
+  sendAudioEnd(imageBase64 = null) {
+    const data = {}
+    if (imageBase64) {
+      data.image = imageBase64
+    }
+    this.send('audio_end', data)
   }
 
   /**
-   * 发送文本输入
+   * 发送文本输入（可选附带图像帧）
    */
-  sendTextInput(text) {
-    this.send('text_input', { text })
+  sendTextInput(text, imageBase64 = null) {
+    const data = { text }
+    if (imageBase64) {
+      data.image = imageBase64
+    }
+    this.send('text_input', data)
   }
 
   /**

@@ -1,6 +1,6 @@
 """
 视觉理解服务
-分析摄像头画面内容
+分析摄像头画面内容（适配 MiMo mimo-v2.5 多模态）
 """
 import base64
 from typing import Optional
@@ -15,10 +15,10 @@ class VisionService:
         self.client = self._create_client()
 
     def _create_client(self):
-        """创建 OpenAI 客户端"""
+        """创建 MiMo OpenAI 兼容客户端"""
         return AsyncOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL
+            api_key=settings.MIMO_API_KEY,
+            base_url=settings.MIMO_BASE_URL
         )
 
     async def analyze_image(self, image_base64: str, prompt: str = None) -> Optional[str]:
@@ -32,8 +32,8 @@ class VisionService:
         Returns:
             图像描述文本
         """
-        if not settings.OPENAI_API_KEY:
-            return "（未配置 API Key，无法分析画面）"
+        if not settings.MIMO_API_KEY:
+            return "（未配置 MiMo API Key，无法分析画面）"
 
         try:
             # 确保图像有正确的前缀
@@ -47,23 +47,26 @@ class VisionService:
                 prompt = "请用简洁的中文描述这张图片中的主要内容，包括主要物体、人物、场景等。如果有什么特别值得注意的地方，也请指出。"
 
             response = await self.client.chat.completions.create(
-                model=settings.VISION_MODEL,
+                model=settings.CHAT_MODEL,
                 messages=[
+                    {
+                        "role": "system",
+                        "content": settings.SYSTEM_PROMPT
+                    },
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": prompt},
                             {
                                 "type": "image_url",
                                 "image_url": {
-                                    "url": image_url,
-                                    "detail": "low"  # 降低成本
+                                    "url": image_url
                                 }
-                            }
+                            },
+                            {"type": "text", "text": prompt}
                         ]
                     }
                 ],
-                max_tokens=settings.VISION_MAX_TOKENS
+                max_tokens=settings.CHAT_MAX_TOKENS
             )
 
             return response.choices[0].message.content

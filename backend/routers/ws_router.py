@@ -68,15 +68,12 @@ async def websocket_chat(websocket: WebSocket):
             msg_data = data.get("data", {})
 
             if msg_type == MessageType.VIDEO_FRAME:
-                # 处理视频帧
+                # 处理视频帧（兼容旧接口，可选）
                 image_base64 = msg_data.get("image")
-                if not image_base64:
-                    continue
-
-                # 异步处理视觉识别
-                asyncio.create_task(
-                    process_vision(websocket, session, image_base64)
-                )
+                if image_base64:
+                    asyncio.create_task(
+                        process_vision(websocket, session, image_base64)
+                    )
 
             elif msg_type == MessageType.AUDIO_CHUNK:
                 # 累积音频数据
@@ -86,17 +83,19 @@ async def websocket_chat(websocket: WebSocket):
                     stt_service.add_chunk(session_id, audio_base64)
 
             elif msg_type == MessageType.AUDIO_END:
-                # 音频结束，进行识别
+                # 音频结束，进行识别（可选附带图像帧）
+                image_base64 = msg_data.get("image")
                 asyncio.create_task(
-                    process_speech(websocket, session)
+                    process_speech(websocket, session, image_base64)
                 )
 
             elif msg_type == MessageType.TEXT_INPUT:
-                # 文本输入（调试用）
+                # 文本输入（可选附带图像帧）
                 text = msg_data.get("text", "")
                 if text:
+                    image_base64 = msg_data.get("image")
                     asyncio.create_task(
-                        process_text(websocket, session, text)
+                        process_text(websocket, session, text, image_base64)
                     )
 
             elif msg_type == "config_update":
@@ -118,32 +117,38 @@ async def handle_config_update(ws: WebSocket, session, config_data: dict):
     from ..config import settings
 
     try:
-        # 更新配置
+        # 更新 MiMo 统一配置
         if "api_key" in config_data:
-            settings.OPENAI_API_KEY = config_data["api_key"]
+            settings.MIMO_API_KEY = config_data["api_key"]
         if "base_url" in config_data:
-            settings.OPENAI_BASE_URL = config_data["base_url"]
-        if "vision_model" in config_data:
-            settings.VISION_MODEL = config_data["vision_model"]
+            settings.MIMO_BASE_URL = config_data["base_url"]
         if "chat_model" in config_data:
             settings.CHAT_MODEL = config_data["chat_model"]
+        if "asr_model" in config_data:
+            settings.ASR_MODEL = config_data["asr_model"]
+        if "tts_model" in config_data:
+            settings.TTS_MODEL = config_data["tts_model"]
         if "tts_voice" in config_data:
             settings.TTS_VOICE = config_data["tts_voice"]
 
-        # 重新初始化服务
+        # 重新初始化所有服务客户端
         from ..services.vision_service import vision_service
         from ..services.llm_service import llm_service
+        from ..services.stt_service import stt_service
         from ..services.tts_service import tts_service
 
         vision_service.client = vision_service._create_client()
         llm_service.client = llm_service._create_client()
+        stt_service.client = stt_service._create_client()
+        tts_service.client = tts_service._create_client()
 
         await ws.send_json({
             "type": "config_updated",
             "data": {"success": True, "message": "配置已更新"}
         })
 
-        print(f"配置已更新: API Key={settings.OPENAI_API_KEY[:8]}...")
+        api_key_preview = settings.MIMO_API_KEY[:8] + "..." if settings.MIMO_API_KEY else "(空)"
+        print(f"配置已更新: API Key={api_key_preview}, Base URL={settings.MIMO_BASE_URL}")
 
     except Exception as e:
         print(f"配置更新错误: {e}")
@@ -151,7 +156,7 @@ async def handle_config_update(ws: WebSocket, session, config_data: dict):
 
 
 async def process_vision(ws: WebSocket, session, image_base64: str):
-    """处理视觉识别"""
+    """处理视觉识别（兼容旧接口）"""
     from ..services.vision_service import vision_service
 
     try:
@@ -162,7 +167,6 @@ async def process_vision(ws: WebSocket, session, image_base64: str):
         description = await vision_service.analyze_image(image_base64)
 
         if description:
-            session.current_frame_description = description
             session.update_cost("vision")
 
             # 发送成本更新
@@ -176,8 +180,8 @@ async def process_vision(ws: WebSocket, session, image_base64: str):
         session.status = StatusType.IDLE
 
 
-async def process_speech(ws: WebSocket, session):
-    """处理语音识别"""
+async def process_speech(ws: WebSocket, session, image_base64: str = None):
+    """处理语音识别（可选附带图像帧）"""
     from ..services.stt_service import stt_service
     from ..services.tts_service import tts_service
     from ..services.llm_service import llm_service
@@ -199,7 +203,7 @@ async def process_speech(ws: WebSocket, session):
         # 显示用户文字
         await ws.send_json({
             "type": MessageType.AI_RESPONSE,
-            "data": {"text": f"🎤 {text}", "is_user": True, "is_streaming": False}
+            "data": {"text": text, "is_user": True, "is_streaming": False}
         })
 
         # 调用 LLM 生成回复
@@ -209,8 +213,8 @@ async def process_speech(ws: WebSocket, session):
         # 添加用户消息到历史
         session.add_turn("user", text)
 
-        # 生成回复
-        response = await llm_service.chat(session)
+        # 生成回复（如果有图像，使用多模态调用）
+        response = await llm_service.chat(session, image_base64=image_base64)
 
         # 添加助手回复到历史
         session.add_turn("assistant", response)
@@ -247,8 +251,8 @@ async def process_speech(ws: WebSocket, session):
         await send_error(ws, "STT_ERROR", str(e))
 
 
-async def process_text(ws: WebSocket, session, text: str):
-    """处理文本输入"""
+async def process_text(ws: WebSocket, session, text: str, image_base64: str = None):
+    """处理文本输入（可选附带图像帧）"""
     from ..services.tts_service import tts_service
     from ..services.llm_service import llm_service
 
@@ -259,8 +263,8 @@ async def process_text(ws: WebSocket, session, text: str):
         # 添加用户消息到历史
         session.add_turn("user", text)
 
-        # 生成回复
-        response = await llm_service.chat(session)
+        # 生成回复（如果有图像，使用多模态调用）
+        response = await llm_service.chat(session, image_base64=image_base64)
 
         # 添加助手回复到历史
         session.add_turn("assistant", response)

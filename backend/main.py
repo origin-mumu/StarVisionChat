@@ -62,8 +62,10 @@ async def get_config():
     return {
         "stt_mode": settings.STT_MODE,
         "tts_mode": settings.TTS_MODE,
-        "vision_model": settings.VISION_MODEL,
         "chat_model": settings.CHAT_MODEL,
+        "asr_model": settings.ASR_MODEL,
+        "tts_model": settings.TTS_MODEL,
+        "tts_voice": settings.TTS_VOICE,
         "frame_interval": settings.FRAME_INTERVAL,
     }
 
