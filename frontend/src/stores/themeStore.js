@@ -18,6 +18,7 @@ const THEMES = [
 
 export const useThemeStore = defineStore('theme', () => {
   const currentTheme = ref('default')
+  const themes = ref(THEMES)
 
   // 初始化主题
   function init() {
@@ -49,7 +50,7 @@ export const useThemeStore = defineStore('theme', () => {
 
   return {
     currentTheme,
-    themes: THEMES,
+    themes,
     init,
     setTheme,
   }

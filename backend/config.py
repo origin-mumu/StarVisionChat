@@ -1,5 +1,6 @@
 """
 StarVisionChat 配置管理
+适配 MiMo 模型体系
 """
 import os
 from pathlib import Path
@@ -15,34 +16,31 @@ class Settings:
 
     # 应用基础配置
     APP_NAME: str = "StarVisionChat"
-    APP_VERSION: str = "0.1.0"
+    APP_VERSION: str = "0.2.0"
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
 
     # 服务器配置
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
 
-    # OpenAI 配置
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-    OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    # ─── MiMo API 配置（TokenPlan 会员） ───
+    MIMO_API_KEY: str = os.getenv("MIMO_API_KEY", "")
+    MIMO_BASE_URL: str = os.getenv("MIMO_BASE_URL", "https://token-plan-cn.xiaomimimo.com/v1")
 
-    # 视觉模型配置
-    VISION_MODEL: str = os.getenv("VISION_MODEL", "gpt-4o-mini")
-    VISION_MODEL_STRONG: str = os.getenv("VISION_MODEL_STRONG", "gpt-4o")
-    VISION_MAX_TOKENS: int = int(os.getenv("VISION_MAX_TOKENS", "300"))
+    # 对话模型（内置多模态，支持图像/音频/视频输入）
+    CHAT_MODEL: str = os.getenv("CHAT_MODEL", "mimo-v2.5")
+    CHAT_MAX_TOKENS: int = int(os.getenv("CHAT_MAX_TOKENS", "1024"))
 
-    # 对话模型配置
-    CHAT_MODEL: str = os.getenv("CHAT_MODEL", "gpt-4o-mini")
-    CHAT_MODEL_STRONG: str = os.getenv("CHAT_MODEL_STRONG", "gpt-4o")
-    CHAT_MAX_TOKENS: int = int(os.getenv("CHAT_MAX_TOKENS", "500"))
+    # 语音识别模型 (ASR)
+    ASR_MODEL: str = os.getenv("ASR_MODEL", "mimo-v2.5-asr")
 
-    # STT 配置
-    STT_MODE: str = os.getenv("STT_MODE", "local")  # local / cloud
-    WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "base")
+    # 语音合成模型 (TTS)
+    TTS_MODEL: str = os.getenv("TTS_MODEL", "mimo-v2.5-tts")
+    TTS_VOICE: str = os.getenv("TTS_VOICE", "mimo_default")
 
-    # TTS 配置
-    TTS_MODE: str = os.getenv("TTS_MODE", "edge")  # edge / openai
-    TTS_VOICE: str = os.getenv("TTS_VOICE", "zh-CN-XiaoxiaoNeural")
+    # STT/TTS 模式（固定为 mimo）
+    STT_MODE: str = "mimo"
+    TTS_MODE: str = "mimo"
 
     # 帧采样配置
     FRAME_INTERVAL: float = float(os.getenv("FRAME_INTERVAL", "2.0"))  # 秒

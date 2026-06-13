@@ -14,7 +14,6 @@ class Session:
         self.session_id = session_id
         self.created_at = datetime.now()
         self.conversation_history: List[ConversationTurn] = []
-        self.current_frame_description: Optional[str] = None
         self.status: StatusType = StatusType.IDLE
         self.cost_data = CostData()
 
@@ -39,13 +38,6 @@ class Session:
 
         messages = [{"role": "system", "content": settings.SYSTEM_PROMPT}]
 
-        # 添加当前画面描述作为系统上下文
-        if self.current_frame_description:
-            messages.append({
-                "role": "system",
-                "content": f"当前摄像头画面内容：{self.current_frame_description}"
-            })
-
         # 添加历史对话
         recent_history = self.conversation_history[-(max_turns * 2):]
         for turn in recent_history:
@@ -57,7 +49,7 @@ class Session:
         """更新成本统计"""
         if cost_type == "vision":
             self.cost_data.vision_calls += amount
-            self.cost_data.estimated_cost += 0.0004 * amount  # gpt-4o-mini
+            self.cost_data.estimated_cost += 0.0004 * amount  # MiMo 视觉分析
         elif cost_type == "stt":
             self.cost_data.stt_calls += amount
             self.cost_data.estimated_cost += 0.0  # 本地免费
@@ -66,7 +58,7 @@ class Session:
             self.cost_data.estimated_cost += (amount / 1000) * 0.0002
         elif cost_type == "tts_chars":
             self.cost_data.tts_chars += amount
-            self.cost_data.estimated_cost += 0.0  # edge-tts 免费
+            self.cost_data.estimated_cost += 0.0  # MiMo TTS
 
 
 class SessionManager:

@@ -6,7 +6,7 @@ websockets==14.1
 # HTTP Client
 httpx==0.28.1
 
-# AI SDK
+# AI SDK (MiMo OpenAI-compatible API)
 openai==1.58.1
 
 # Audio Processing
@@ -21,12 +21,6 @@ pydantic==2.10.4
 
 # Environment
 python-dotenv==1.0.1
-
-# Whisper (Local STT) - 使用 faster-whisper，兼容 Python 3.12+
-faster-whisper>=1.0.0
-
-# TTS
-edge-tts==6.1.19
 
 # Utilities
 numpy==2.2.1
