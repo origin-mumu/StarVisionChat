@@ -22,7 +22,7 @@ class Session:
         turn = ConversationTurn(
             role=role,
             content=content,
-            image_description=image_description or self.current_frame_description
+            image_description=image_description
         )
         self.conversation_history.append(turn)
 

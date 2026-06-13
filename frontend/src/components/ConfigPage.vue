@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { wsService } from '../services/wsService'
 import {
   View,
@@ -11,8 +11,12 @@ const emit = defineEmits(['done'])
 
 const isVisible = ref(false)
 const showApiKey = ref(false)
+const showQwenApiKey = ref(false)
 
-/* ─── Form fields ─── */
+/* ─── Model provider ─── */
+const modelProvider = ref('mimo')  // mimo / qwen
+
+/* ─── MiMo fields ─── */
 const apiKey = ref('')
 const baseUrl = ref('https://token-plan-cn.xiaomimimo.com/v1')
 const chatModel = ref('mimo-v2.5')
@@ -20,14 +24,35 @@ const asrModel = ref('mimo-v2.5-asr')
 const ttsModel = ref('mimo-v2.5-tts')
 const ttsVoice = ref('mimo_default')
 
+/* ─── Qwen fields ─── */
+const qwenApiKey = ref('')
+const qwenModel = ref('qwen3.5-omni-plus-realtime')
+const qwenVoice = ref('Ethan')
+const qwenRegion = ref('cn')
+
 const saving = ref(false)
 const errorMsg = ref('')
 
-/* ─── TTS 音色选项 ─── */
+/* ─── Options ─── */
 const ttsVoiceOptions = [
   { value: 'mimo_default', label: 'MiMo 默认' },
   { value: 'Chloe', label: 'Chloe' },
 ]
+
+const qwenVoiceOptions = [
+  { value: 'Ethan', label: 'Ethan (男声)' },
+  { value: 'Chloe', label: 'Chloe (女声)' },
+]
+
+const qwenModelOptions = [
+  { value: 'qwen3.5-omni-plus-realtime', label: 'Qwen3.5 Omni Plus (高质量)' },
+  { value: 'qwen3.5-omni-flash-realtime', label: 'Qwen3.5 Omni Flash (快速)' },
+]
+
+/* ─── Computed ─── */
+const currentApiKey = computed(() => {
+  return modelProvider.value === 'mimo' ? apiKey.value : qwenApiKey.value
+})
 
 /* ─── Load saved config ─── */
 onMounted(() => {
@@ -35,12 +60,21 @@ onMounted(() => {
   if (saved) {
     try {
       const config = JSON.parse(saved)
+      modelProvider.value = config.modelProvider || 'mimo'
+
+      // MiMo config
       apiKey.value = config.apiKey || ''
       baseUrl.value = config.baseUrl || 'https://token-plan-cn.xiaomimimo.com/v1'
       chatModel.value = config.chatModel || 'mimo-v2.5'
       asrModel.value = config.asrModel || 'mimo-v2.5-asr'
       ttsModel.value = config.ttsModel || 'mimo-v2.5-tts'
       ttsVoice.value = config.ttsVoice || 'mimo_default'
+
+      // Qwen config
+      qwenApiKey.value = config.qwenApiKey || ''
+      qwenModel.value = config.qwenModel || 'qwen3.5-omni-plus-realtime'
+      qwenVoice.value = config.qwenVoice || 'Ethan'
+      qwenRegion.value = config.qwenRegion || 'cn'
     } catch { /* ignore */ }
   }
   requestAnimationFrame(() => { isVisible.value = true })
@@ -49,8 +83,13 @@ onMounted(() => {
 function saveAndEnter() {
   errorMsg.value = ''
 
-  if (!apiKey.value.trim()) {
+  // Validate based on selected provider
+  if (modelProvider.value === 'mimo' && !apiKey.value.trim()) {
     errorMsg.value = '请输入 MiMo API Key'
+    return
+  }
+  if (modelProvider.value === 'qwen' && !qwenApiKey.value.trim()) {
+    errorMsg.value = '请输入 Qwen API Key'
     return
   }
 
@@ -58,30 +97,43 @@ function saveAndEnter() {
 
   // Save to localStorage
   const config = {
+    modelProvider: modelProvider.value,
+    // MiMo
     apiKey: apiKey.value.trim(),
     baseUrl: baseUrl.value.trim(),
     chatModel: chatModel.value,
     asrModel: asrModel.value,
     ttsModel: ttsModel.value,
     ttsVoice: ttsVoice.value,
+    // Qwen
+    qwenApiKey: qwenApiKey.value.trim(),
+    qwenModel: qwenModel.value,
+    qwenVoice: qwenVoice.value,
+    qwenRegion: qwenRegion.value,
     configured: true,
   }
   localStorage.setItem('starvisionchat_config', JSON.stringify(config))
 
   // Send to backend
   const wsConfig = {
+    model_provider: config.modelProvider,
+    // MiMo
     api_key: config.apiKey,
     base_url: config.baseUrl,
     chat_model: config.chatModel,
     asr_model: config.asrModel,
     tts_model: config.ttsModel,
     tts_voice: config.ttsVoice,
+    // Qwen
+    qwen_api_key: config.qwenApiKey,
+    qwen_model: config.qwenModel,
+    qwen_voice: config.qwenVoice,
+    qwen_region: config.qwenRegion,
   }
 
   if (wsService.ws && wsService.ws.readyState === WebSocket.OPEN) {
     wsService.send('config_update', wsConfig)
   } else {
-    // Wait for connection
     const onConnected = () => {
       wsService.send('config_update', wsConfig)
       wsService.off('connected', onConnected)
@@ -110,97 +162,143 @@ function skipConfig() {
     <div class="config-card">
       <div class="config-header">
         <h2>系统配置</h2>
-        <p>配置 MiMo API 参数以开始使用</p>
+        <p>选择模型并配置 API 参数</p>
       </div>
 
       <div class="config-form">
-        <!-- ── API 连接 ── -->
-        <div class="section-label">
-          <span class="section-line"></span>
-          <span class="section-text">API 连接</span>
-          <span class="section-line"></span>
-        </div>
-
-        <!-- API Key -->
+        <!-- Model Provider Selection -->
         <div class="form-group">
-          <label class="form-label">API Key <span class="required">*</span></label>
-          <div class="input-with-toggle">
-            <input
-              v-model="apiKey"
-              :type="showApiKey ? 'text' : 'password'"
-              class="form-input"
-              placeholder="输入你的 MiMo API Key"
-              @keyup.enter="saveAndEnter"
-            />
-            <button class="toggle-vis" @click="showApiKey = !showApiKey">
-              <el-icon v-if="showApiKey"><Hide /></el-icon>
-              <el-icon v-else><View /></el-icon>
+          <label class="form-label">模型选择</label>
+          <div class="provider-tabs">
+            <button
+              class="provider-tab"
+              :class="{ active: modelProvider === 'mimo' }"
+              @click="modelProvider = 'mimo'"
+            >
+              MiMo
+            </button>
+            <button
+              class="provider-tab"
+              :class="{ active: modelProvider === 'qwen' }"
+              @click="modelProvider = 'qwen'"
+            >
+              Qwen
             </button>
           </div>
         </div>
 
-        <!-- API Base URL -->
-        <div class="form-group">
-          <label class="form-label">Base URL</label>
-          <input
-            v-model="baseUrl"
-            class="form-input"
-            placeholder="https://token-plan-cn.xiaomimimo.com/v1"
-          />
-          <span class="form-hint">TokenPlan 会员专属地址</span>
-        </div>
-
-        <!-- ── 模型配置 ── -->
-        <div class="section-label">
-          <span class="section-line"></span>
-          <span class="section-text">模型配置</span>
-          <span class="section-line"></span>
-        </div>
-
-        <!-- 对话模型 -->
-        <div class="form-group">
-          <label class="form-label">对话模型（多模态）</label>
-          <input
-            v-model="chatModel"
-            class="form-input form-input-readonly"
-            readonly
-          />
-          <span class="form-hint">支持文本、图像、音频、视频输入</span>
-        </div>
-
-        <!-- 语音识别 & 语音合成 并排 -->
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">语音识别 (ASR)</label>
-            <input
-              v-model="asrModel"
-              class="form-input form-input-readonly"
-              readonly
-            />
+        <!-- MiMo Config -->
+        <template v-if="modelProvider === 'mimo'">
+          <div class="section-label">
+            <span class="section-line"></span>
+            <span class="section-text">MiMo 配置</span>
+            <span class="section-line"></span>
           </div>
-          <div class="form-group">
-            <label class="form-label">语音合成 (TTS)</label>
-            <input
-              v-model="ttsModel"
-              class="form-input form-input-readonly"
-              readonly
-            />
-          </div>
-        </div>
 
-        <!-- TTS 音色 -->
-        <div class="form-group">
-          <label class="form-label">TTS 音色</label>
-          <select v-model="ttsVoice" class="form-input form-select">
-            <option
-              v-for="option in ttsVoiceOptions"
-              :key="option.value"
-              :value="option.value"
-            >
-              {{ option.label }}
-            </option>
-          </select>
-        </div>
+          <div class="form-group">
+            <label class="form-label">API Key <span class="required">*</span></label>
+            <div class="input-with-toggle">
+              <input
+                v-model="apiKey"
+                :type="showApiKey ? 'text' : 'password'"
+                class="form-input"
+                placeholder="输入你的 MiMo API Key"
+              />
+              <button class="toggle-vis" @click="showApiKey = !showApiKey">
+                <el-icon v-if="showApiKey"><Hide /></el-icon>
+                <el-icon v-else><View /></el-icon>
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Base URL</label>
+            <input v-model="baseUrl" class="form-input" placeholder="https://token-plan-cn.xiaomimimo.com/v1" />
+            <span class="form-hint">TokenPlan 会员专属地址</span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">对话模型</label>
+            <input v-model="chatModel" class="form-input form-input-readonly" readonly />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">语音识别</label>
+              <input v-model="asrModel" class="form-input form-input-readonly" readonly />
+            </div>
+            <div class="form-group">
+              <label class="form-label">语音合成</label>
+              <input v-model="ttsModel" class="form-input form-input-readonly" readonly />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">TTS 音色</label>
+            <select v-model="ttsVoice" class="form-input form-select">
+              <option v-for="opt in ttsVoiceOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </div>
+        </template>
+
+        <!-- Qwen Config -->
+        <template v-if="modelProvider === 'qwen'">
+          <div class="section-label">
+            <span class="section-line"></span>
+            <span class="section-text">Qwen 配置</span>
+            <span class="section-line"></span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">API Key <span class="required">*</span></label>
+            <div class="input-with-toggle">
+              <input
+                v-model="qwenApiKey"
+                :type="showQwenApiKey ? 'text' : 'password'"
+                class="form-input"
+                placeholder="输入你的 Qwen API Key (DASHSCOPE_API_KEY)"
+              />
+              <button class="toggle-vis" @click="showQwenApiKey = !showQwenApiKey">
+                <el-icon v-if="showQwenApiKey"><Hide /></el-icon>
+                <el-icon v-else><View /></el-icon>
+              </button>
+            </div>
+            <span class="form-hint">在阿里云百炼平台获取</span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">模型</label>
+            <select v-model="qwenModel" class="form-input form-select">
+              <option v-for="opt in qwenModelOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">音色</label>
+              <select v-model="qwenVoice" class="form-input form-select">
+                <option v-for="opt in qwenVoiceOptions" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">地域</label>
+              <select v-model="qwenRegion" class="form-input form-select">
+                <option value="cn">华北2（北京）</option>
+                <option value="intl">新加坡</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-tip">
+            Qwen-Omni-Realtime 支持实时语音对话，延迟更低
+          </div>
+        </template>
 
         <!-- Error -->
         <p v-if="errorMsg" class="form-error">{{ errorMsg }}</p>
@@ -282,6 +380,40 @@ function skipConfig() {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+/* Provider tabs */
+.provider-tabs {
+  display: flex;
+  gap: 8px;
+  background: var(--canvas);
+  border-radius: 12px;
+  padding: 4px;
+}
+
+.provider-tab {
+  flex: 1;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.provider-tab.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: var(--shadow-button);
+}
+
+.provider-tab:hover:not(.active) {
+  background: var(--surface-hover);
+  color: var(--ink);
 }
 
 /* Section divider */

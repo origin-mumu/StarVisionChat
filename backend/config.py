@@ -1,6 +1,6 @@
 """
 StarVisionChat 配置管理
-适配 MiMo 模型体系
+支持 MiMo 和 Qwen-Omni-Realtime 双模型
 """
 import os
 from pathlib import Path
@@ -16,12 +16,15 @@ class Settings:
 
     # 应用基础配置
     APP_NAME: str = "StarVisionChat"
-    APP_VERSION: str = "0.2.0"
+    APP_VERSION: str = "0.3.0"
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
 
     # 服务器配置
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
+
+    # ─── 模型选择 ───
+    MODEL_PROVIDER: str = os.getenv("MODEL_PROVIDER", "mimo")  # mimo / qwen
 
     # ─── MiMo API 配置（TokenPlan 会员） ───
     MIMO_API_KEY: str = os.getenv("MIMO_API_KEY", "")
@@ -38,9 +41,19 @@ class Settings:
     TTS_MODEL: str = os.getenv("TTS_MODEL", "mimo-v2.5-tts")
     TTS_VOICE: str = os.getenv("TTS_VOICE", "mimo_default")
 
-    # STT/TTS 模式（固定为 mimo）
-    STT_MODE: str = "mimo"
-    TTS_MODE: str = "mimo"
+    # ─── Qwen-Omni-Realtime 配置 ───
+    QWEN_API_KEY: str = os.getenv("QWEN_API_KEY", "")
+    QWEN_MODEL: str = os.getenv("QWEN_MODEL", "qwen3.5-omni-plus-realtime")
+    QWEN_VOICE: str = os.getenv("QWEN_VOICE", "Ethan")
+    QWEN_REGION: str = os.getenv("QWEN_REGION", "cn")  # cn / intl
+
+    # Qwen WebSocket 地址
+    @property
+    def QWEN_WS_URL(self) -> str:
+        if self.QWEN_REGION == "cn":
+            return "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+        else:
+            return "wss://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/api-ws/v1/realtime"
 
     # 帧采样配置
     FRAME_INTERVAL: float = float(os.getenv("FRAME_INTERVAL", "2.0"))  # 秒
