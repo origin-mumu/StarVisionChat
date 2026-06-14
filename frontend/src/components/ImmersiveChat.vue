@@ -17,6 +17,7 @@ import { useSceneStore } from "../stores/sceneStore";
 import { wsService } from "../services/wsService";
 import { useCamera } from "../composables/useCamera";
 import { useMicrophone } from "../composables/useMicrophone";
+import { useGesture } from "../composables/useGesture";
 import { useThemeStore } from "../stores/themeStore";
 import SettingsPanel from "./SettingsPanel.vue";
 import MemoryPanel from "./MemoryPanel.vue";
@@ -39,6 +40,7 @@ import {
   FullScreen,
   ArrowLeft,
   ArrowRight,
+  Lock,
 } from "@element-plus/icons-vue";
 
 import { useRouter } from "vue-router";
@@ -55,12 +57,18 @@ const sceneStore = useSceneStore();
 const showSessionList = ref(false);
 const showSceneMenu = ref(false);
 const showMemoryPanel = ref(false);
+const showQrPanel = ref(false);
+const lanUrl = ref("");
+const cameraSessionId = ref("");
+const remoteStream = ref(null);
+const useRemoteCamera = ref(false);
+const remoteConnecting = ref(false);
 const videoMain = ref(false); // false=AI主界面, true=视频主界面
 const chatCollapsed = ref(false); // 侧边栏折叠
 const memoryNotification = ref("");
 const sceneSuggestion = ref(null); // { sceneName }
 let sceneMonitorTimer = null;
-const SCENE_MONITOR_INTERVAL = 8000; // 8秒检测一次
+const SCENE_MONITOR_INTERVAL = 4000; // 8秒检测一次
 
 // 自定义场景
 const showAddScene = ref(false);
@@ -83,6 +91,137 @@ function loadModelProvider() {
     }
   }
 }
+
+/* ─── Multi-device QR ─── */
+const CAMERA_WS_URL = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/api/ws/camera`;
+let cameraWs = null;
+let cameraPc = null;
+
+function generateSessionId() {
+  return "cam_" + Math.random().toString(36).substring(2, 10);
+}
+
+async function openQrPanel() {
+  if (lanUrl.value) {
+    showQrPanel.value = true;
+    return;
+  }
+  try {
+    const resp = await fetch("/api/network-info");
+    const data = await resp.json();
+    if (data.lan_ip && data.lan_ip !== "127.0.0.1") {
+      cameraSessionId.value = generateSessionId();
+      lanUrl.value = `${data.frontend_url}/#/camera?session=${cameraSessionId.value}`;
+      showQrPanel.value = true;
+      // 预连接信令通道
+      connectCameraSignaling();
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function connectCameraSignaling() {
+  if (cameraWs) cameraWs.close();
+  cameraWs = new WebSocket(CAMERA_WS_URL);
+
+  cameraWs.onopen = () => {
+    cameraWs.send(
+      JSON.stringify({
+        type: "camera_connect",
+        data: { session: cameraSessionId.value },
+      }),
+    );
+  };
+
+  cameraWs.onmessage = async (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === "camera_ready") {
+      remoteConnecting.value = true;
+    } else if (msg.type === "webrtc_offer") {
+      await handleRemoteOffer(msg.data);
+    } else if (msg.type === "webrtc_ice") {
+      try {
+        if (cameraPc)
+          await cameraPc.addIceCandidate(new RTCIceCandidate(msg.data));
+      } catch {
+        /* ignore */
+      }
+    } else if (msg.type === "camera_disconnect") {
+      disconnectRemoteCamera();
+    }
+  };
+}
+
+async function handleRemoteOffer(sdp) {
+  closePeerConnection();
+  const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+  cameraPc = new RTCPeerConnection(config);
+
+  cameraPc.ontrack = (event) => {
+    remoteStream.value = event.streams[0];
+    useRemoteCamera.value = true;
+    remoteConnecting.value = false;
+    showQrPanel.value = false;
+  };
+
+  cameraPc.onicecandidate = (event) => {
+    if (event.candidate && cameraWs?.readyState === WebSocket.OPEN) {
+      cameraWs.send(
+        JSON.stringify({
+          type: "webrtc_ice",
+          data: {
+            session: cameraSessionId.value,
+            candidate: event.candidate.toJSON(),
+          },
+        }),
+      );
+    }
+  };
+
+  cameraPc.onconnectionstatechange = () => {
+    if (
+      cameraPc &&
+      (cameraPc.connectionState === "failed" ||
+        cameraPc.connectionState === "disconnected")
+    ) {
+      disconnectRemoteCamera();
+    }
+  };
+
+  await cameraPc.setRemoteDescription(new RTCSessionDescription(sdp));
+  const answer = await cameraPc.createAnswer();
+  await cameraPc.setLocalDescription(answer);
+  cameraWs.send(
+    JSON.stringify({
+      type: "webrtc_answer",
+      data: { session: cameraSessionId.value, sdp: answer },
+    }),
+  );
+}
+
+function closePeerConnection() {
+  if (cameraPc) {
+    cameraPc.close();
+    cameraPc = null;
+  }
+}
+
+function disconnectRemoteCamera() {
+  closePeerConnection();
+  remoteStream.value = null;
+  useRemoteCamera.value = false;
+  remoteConnecting.value = false;
+  if (cameraWs) {
+    cameraWs.close();
+    cameraWs = null;
+  }
+}
+
+onBeforeUnmount(() => {
+  disconnectRemoteCamera();
+  // ... existing cleanup
+});
 
 onMounted(() => {
   loadModelProvider();
@@ -124,6 +263,25 @@ const {
 
 const cameraLoading = ref(false);
 
+// 手势识别 — 检测逻辑已合并到场景监控，这里只管理锁定状态
+const gesture = useGesture();
+
+// 手势锁定 → 同步到场景自动切换
+watch(() => gesture.isLocked.value, (locked) => {
+  sceneStore.isAutoSwitchEnabled = !locked;
+});
+
+// 远程摄像头：切换到手机的 video 流
+watch(remoteStream, (stream) => {
+  if (stream && videoRef.value) {
+    stopCameraFn();
+    videoRef.value.srcObject = stream;
+    videoRef.value.play().catch(() => {});
+  } else if (!stream && videoRef.value && !isCameraOn.value) {
+    initCamera();
+  }
+});
+
 async function toggleCamera() {
   if (isCameraOn.value) {
     stopCameraFn();
@@ -150,6 +308,9 @@ const statusText = ref("System Ready");
 const showHint = ref(true);
 const isLocalSending = ref(false);
 const interimText = ref("");
+
+/* ─── 连续对话模式 ─── */
+const continuousMode = ref(true); // AI说完后自动开始录音
 
 /* ─── Text Input ─── */
 const inputText = ref("");
@@ -216,10 +377,27 @@ function initSpeech() {
   speechSupported.value = !!navigator.mediaDevices?.getUserMedia;
 }
 
+/** AI说完话后自动触发语音录入（连续对话） */
+let autoVoiceTimer = null;
+function autoContinueVoice() {
+  if (!continuousMode.value) return;
+  if (autoVoiceTimer) { clearTimeout(autoVoiceTimer); autoVoiceTimer = null }
+  autoVoiceTimer = setTimeout(() => {
+    autoVoiceTimer = null;
+    // 再次检查状态，防止竞态
+    if (currentMode.value !== "idle") return;
+    if (!speechSupported.value) return;
+    toggleVoice();
+  }, 600);
+}
+
 async function toggleVoice() {
   if (currentMode.value === "thinking" || currentMode.value === "speaking")
     return;
   if (!speechSupported.value) return;
+
+  // 用户手动点击语音按钮时，取消自动触发
+  if (autoVoiceTimer) { clearTimeout(autoVoiceTimer); autoVoiceTimer = null }
 
   // 重新加载模型配置（可能在设置面板中被修改）
   const saved = localStorage.getItem("starvisionchat_config");
@@ -545,13 +723,14 @@ function checkAutoSwitch(text) {
 function startSceneMonitor() {
   stopSceneMonitor();
   sceneMonitorTimer = setInterval(() => {
-    if (!isCameraOn.value || currentMode.value === "speaking") return;
+    if (!isCameraOn.value && !remoteStream.value) return;
     const frame = captureFrame();
     if (frame) {
       wsService.send("scene_monitor", {
         image: frame,
         scenes: sceneStore.scenes.map((s) => ({ id: s.id, name: s.name })),
         current_scene: sceneStore.currentScene.name,
+        is_locked: gesture.isLocked.value,
       });
     }
   }, SCENE_MONITOR_INTERVAL);
@@ -635,6 +814,7 @@ function handleAIAudio(data) {
       URL.revokeObjectURL(url);
       currentAudio = null;
       setMode("idle");
+      autoContinueVoice();
     };
 
     audio.onerror = () => {
@@ -723,6 +903,7 @@ function playQwenAudioQueue() {
   if (qwenAudioQueue.length === 0) {
     qwenIsPlaying = false;
     setMode("idle");
+    autoContinueVoice();
     return;
   }
 
@@ -812,7 +993,11 @@ function typewriterEffect(text) {
       typewriterTimer = null;
       flushStreamBuffer();
       setMode("speaking");
-      setTimeout(() => setMode("idle"), 1500);
+      setTimeout(() => {
+        setMode("idle");
+        // 文本模式无音频时，也触发连续对话
+        autoContinueVoice();
+      }, 1500);
       isLocalSending.value = false;
     }
   }, 20);
@@ -950,7 +1135,7 @@ function fmt(s) {
    3D Particle Sphere + Background Stars
    ═══════════════════════════════════════════ */
 let SPHERE_RADIUS = 180;
-const PARTICLE_COUNT = 800;
+const PARTICLE_COUNT = 300;
 const BG_STAR_COUNT = 250;
 
 let animId = 0;
@@ -1064,7 +1249,7 @@ class OrbP {
       const palette = [themeColors.accent, themeColors.warm, themeColors.cool];
       this.color = palette[Math.floor(Math.random() * 3)];
     }
-    this.size = Math.random() * 1.5 + 0.5;
+    this.size = Math.random() * 2.5 + 1.0;
     this.x = 0;
     this.y = 0;
     this.z = 0;
@@ -1389,7 +1574,9 @@ onMounted(() => {
   wsService.on("qwen_response_done", handleQwenResponseDone);
   wsService.on("memory_saved", handleMemorySaved);
   wsService.on("scene_detected", handleSceneDetected);
+  wsService.on("gesture_result", (data) => gesture.handleResult(data.result));
 });
+
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(animId);
@@ -1398,6 +1585,7 @@ onBeforeUnmount(() => {
   themeObserver.disconnect();
   if (silenceTimer) clearTimeout(silenceTimer);
   if (typewriterTimer) clearInterval(typewriterTimer);
+  if (autoVoiceTimer) { clearTimeout(autoVoiceTimer); autoVoiceTimer = null; }
   if (currentAudio) {
     currentAudio.pause();
     currentAudio = null;
@@ -1417,6 +1605,7 @@ onBeforeUnmount(() => {
   wsService.off("qwen_transcript", handleQwenTranscript);
   wsService.off("memory_saved", handleMemorySaved);
   wsService.off("scene_detected", handleSceneDetected);
+  wsService.off("gesture_result", (data) => gesture.handleResult(data.result));
   stopSceneMonitor();
   wsService.off("qwen_response_done", handleQwenResponseDone);
 
@@ -1435,25 +1624,25 @@ watch(
 // 切换主/小窗时重置 canvas 尺寸、球半径、重建粒子
 watch(videoMain, (isMain) => {
   nextTick(() => {
-    const c = mainCanvasRef.value
-    if (!c) return
+    const c = mainCanvasRef.value;
+    if (!c) return;
     if (isMain) {
-      c.width = 200
-      c.height = 150
-      width = 200
-      height = 150
-      SPHERE_RADIUS = 60
+      c.width = 200;
+      c.height = 150;
+      width = 200;
+      height = 150;
+      SPHERE_RADIUS = 60;
     } else {
-      width = window.innerWidth
-      height = window.innerHeight
-      c.width = width
-      c.height = height
-      SPHERE_RADIUS = 180
+      width = window.innerWidth;
+      height = window.innerHeight;
+      c.width = width;
+      c.height = height;
+      SPHERE_RADIUS = 260;
     }
     // 重建粒子以适配新半径
-    const palette = [themeColors.accent, themeColors.warm, themeColors.cool]
-    orbParticles = Array.from({ length: PARTICLE_COUNT }, () => new OrbP())
-  })
+    const palette = [themeColors.accent, themeColors.warm, themeColors.cool];
+    orbParticles = Array.from({ length: PARTICLE_COUNT }, () => new OrbP());
+  });
 });
 </script>
 
@@ -1470,6 +1659,13 @@ watch(videoMain, (isMain) => {
       <div v-if="memoryNotification" class="memory-toast">
         <el-icon><Notebook /></el-icon>
         <span>{{ memoryNotification }}</span>
+      </div>
+    </transition>
+
+    <!-- Gesture hint toast -->
+    <transition name="fade">
+      <div v-if="gesture.gestureHint.value" class="gesture-toast">
+        <span>{{ gesture.gestureHint.value }}</span>
       </div>
     </transition>
 
@@ -1494,7 +1690,12 @@ watch(videoMain, (isMain) => {
       @touchend="onUp"
     ></canvas>
     <!-- AI canvas expand button (shown when video is main) -->
-    <div v-if="videoMain" class="ai-mini-badge" @click="videoMain = false" title="切换到 AI 主界面">
+    <div
+      v-if="videoMain"
+      class="ai-mini-badge"
+      @click="videoMain = false"
+      title="切换到 AI 主界面"
+    >
       <el-icon><Star /></el-icon>
     </div>
 
@@ -1514,6 +1715,7 @@ watch(videoMain, (isMain) => {
             :style="{ backgroundColor: sceneStore.currentScene.color }"
           ></span>
           <span class="scene-name">{{ sceneStore.currentScene.name }}</span>
+          <span v-if="gesture.isLocked.value" class="lock-badge" title="场景已锁定，不会自动切换"><el-icon><Lock /></el-icon></span>
         </div>
       </div>
       <div class="top-actions">
@@ -1528,6 +1730,13 @@ watch(videoMain, (isMain) => {
                   v-model="sceneStore.isAutoSwitchEnabled"
                 />
                 <span>自动切换</span>
+              </label>
+              <label class="auto-switch-toggle" title="AI说完后自动开始语音录入">
+                <input
+                  type="checkbox"
+                  v-model="continuousMode"
+                />
+                <span>连续对话</span>
               </label>
             </div>
             <div class="scene-list">
@@ -1586,6 +1795,16 @@ watch(videoMain, (isMain) => {
           </div>
         </Transition>
 
+        <!-- Multi-device QR -->
+        <button
+          class="top-qr-btn"
+          :class="{ active: useRemoteCamera }"
+          @click="useRemoteCamera ? disconnectRemoteCamera() : openQrPanel()"
+          :title="useRemoteCamera ? '点击断开手机摄像头' : '手机扫码打开'"
+        >
+          <el-icon v-if="useRemoteCamera"><FullScreen /></el-icon>
+          <span>{{ useRemoteCamera ? "手机摄像头" : "调用手机相机" }}</span>
+        </button>
         <!-- Theme dots -->
         <div class="theme-dots">
           <span
@@ -1601,11 +1820,19 @@ watch(videoMain, (isMain) => {
         <!-- Settings -->
         <SettingsPanel />
         <!-- Back to Config -->
-        <button class="top-back-btn" @click="router.push('/config')" title="返回配置">
+        <button
+          class="top-back-btn"
+          @click="router.push('/config')"
+          title="返回配置"
+        >
           <el-icon><ArrowLeft /></el-icon>
         </button>
         <!-- Chat panel toggle -->
-        <button class="top-toggle-btn" @click="chatCollapsed = !chatCollapsed" :title="chatCollapsed ? '展开对话' : '收起对话'">
+        <button
+          class="top-toggle-btn"
+          @click="chatCollapsed = !chatCollapsed"
+          :title="chatCollapsed ? '展开对话' : '收起对话'"
+        >
           <span v-if="chatCollapsed">&laquo;</span>
           <span v-else>&raquo;</span>
         </button>
@@ -1619,6 +1846,44 @@ watch(videoMain, (isMain) => {
       @click.self="showMemoryPanel = false"
     >
       <MemoryPanel @close="showMemoryPanel = false" />
+    </div>
+
+    <!-- QR Code Panel -->
+    <div
+      v-if="showQrPanel"
+      class="qr-overlay"
+      @click.self="showQrPanel = false"
+    >
+      <div class="qr-card glass-top">
+        <div class="qr-card-header">
+          <span>手机扫码打开</span>
+          <button class="btn-icon" @click="showQrPanel = false">
+            <el-icon><Close /></el-icon>
+          </button>
+        </div>
+        <p class="qr-card-desc">
+          手机和电脑连同一 WiFi，扫码后在手机上打开，手机会自动建立摄像头连接。
+          如果页面长时间加载请刷新页面重试
+        </p>
+        <div v-if="remoteConnecting" class="qr-connecting">
+          <el-icon class="spin"><Loading /></el-icon>
+          <span>等待手机连接...</span>
+        </div>
+        <img
+          v-else
+          class="qr-card-img"
+          :src="`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(lanUrl)}`"
+          alt="手机扫码访问"
+        />
+        <span class="qr-card-url">{{ lanUrl }}</span>
+        <button
+          class="btn-skip"
+          style="margin-top: 12px"
+          @click="showQrPanel = false"
+        >
+          取消
+        </button>
+      </div>
     </div>
 
     <!-- Video stream overlay -->
@@ -1639,7 +1904,12 @@ watch(videoMain, (isMain) => {
           <div class="pulse-ring"></div>
         </div>
         <!-- Switch to mini button (shown when video is main) -->
-        <button v-if="videoMain" class="video-switch-btn" @click="videoMain = false" title="切换到 AI 主界面">
+        <button
+          v-if="videoMain"
+          class="video-switch-btn"
+          @click="videoMain = false"
+          title="切换到 AI 主界面"
+        >
           <el-icon><Star /></el-icon>
         </button>
       </div>
@@ -1663,14 +1933,14 @@ watch(videoMain, (isMain) => {
           <el-icon v-if="isMicRecording"><Mute /></el-icon>
           <el-icon v-else><Microphone /></el-icon>
         </button>
-        <button
+        <!-- <button
           class="mini-ctrl-btn"
           @click="takeSnapshot"
           title="画面分析"
           :disabled="!isCameraOn"
         >
           <el-icon><Search /></el-icon>
-        </button>
+        </button> -->
         <button
           v-if="!videoMain"
           class="mini-ctrl-btn"
@@ -1970,6 +2240,7 @@ watch(videoMain, (isMain) => {
 .video-main-overlay {
   position: absolute;
   inset: 0;
+  padding: 60px;
   z-index: 10;
   display: flex;
   align-items: center;
@@ -1980,6 +2251,12 @@ watch(videoMain, (isMain) => {
   height: 100%;
   position: relative;
   background: #000;
+  border-radius: 20px;
+  overflow: hidden;
+  border: 2px solid var(--border);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
 }
 .video-main-element {
   width: 100%;
@@ -1993,8 +2270,8 @@ watch(videoMain, (isMain) => {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  border: 1px solid rgba(255,255,255,0.3);
-  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(0, 0, 0, 0.4);
   color: #fff;
   display: flex;
   align-items: center;
@@ -2004,7 +2281,7 @@ watch(videoMain, (isMain) => {
   backdrop-filter: blur(8px);
 }
 .video-switch-btn:hover {
-  background: rgba(0,0,0,0.6);
+  background: rgba(0, 0, 0, 0.6);
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -2420,6 +2697,12 @@ watch(videoMain, (isMain) => {
   justify-content: center;
   align-items: center;
   position: relative;
+  background: var(--glass-mid);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 0.5px solid var(--glass-border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-card);
 }
 
 .wave-canvas {
@@ -2541,6 +2824,37 @@ watch(videoMain, (isMain) => {
   background: var(--accent-soft);
 }
 
+.top-qr-btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.top-qr-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.top-qr-btn.active {
+  color: #fff;
+  background: rgba(76, 175, 80, 0.85);
+  border-color: rgba(76, 175, 80, 0.6);
+}
+.top-qr-btn.active:hover {
+  color: #fff;
+  background: rgba(244, 67, 54, 0.85);
+  border-color: rgba(244, 67, 54, 0.6);
+}
+
 .chat-panel {
   position: absolute;
   right: 0;
@@ -2554,26 +2868,10 @@ watch(videoMain, (isMain) => {
   z-index: 20;
   pointer-events: none;
   transition: transform 0.3s ease;
-  background: linear-gradient(
-    to right,
-    transparent 0%,
-    var(--canvas) 60%,
-    var(--canvas) 100%
-  );
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    transparent 0%,
-    black 6%,
-    black 92%,
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 0%,
-    black 6%,
-    black 92%,
-    transparent 100%
-  );
+  background: var(--glass-mid);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-left: 0.5px solid var(--glass-border);
 }
 .chat-panel.collapsed {
   transform: translateX(100%);
@@ -3103,20 +3401,23 @@ watch(videoMain, (isMain) => {
   .chat-panel {
     width: 100%;
     padding: 60px 16px 120px 16px;
-    background: linear-gradient(
-      to bottom,
-      transparent 0%,
-      var(--canvas) 15%,
-      var(--canvas) 100%
-    );
-    -webkit-mask-image: none;
-    mask-image: none;
+    background: var(--glass-mid);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-left: none;
   }
 
   .video-mini-overlay {
     bottom: auto;
     top: 70px;
     left: 12px;
+  }
+
+  .video-main-overlay {
+    padding: 12px;
+  }
+  .video-main-wrapper {
+    border-radius: 12px;
   }
 
   .video-mini-wrapper {
@@ -3177,6 +3478,31 @@ watch(videoMain, (isMain) => {
     transform: translateX(-50%) translateY(0);
   }
 }
+
+/* Gesture Toast */
+.gesture-toast {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2000;
+  padding: 8px 18px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  animation: toast-in 0.3s ease;
+}
+
+/* Lock Badge */
+.lock-badge {
+  font-size: 12px;
+  margin-left: 4px;
+  cursor: default;
+}
+
 .fade-enter-active {
   transition: opacity 0.3s;
 }
@@ -3208,5 +3534,94 @@ watch(videoMain, (isMain) => {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
   animation: toast-in 0.3s ease;
   white-space: nowrap;
+}
+
+/* QR Code Panel */
+.qr-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(4px);
+}
+
+.qr-card {
+  text-align: center;
+  padding: 28px 32px;
+  border-radius: 20px;
+  max-width: 340px;
+  animation: qr-in 0.25s ease;
+}
+
+@keyframes qr-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.qr-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.qr-card-desc {
+  font-size: 13px;
+  color: var(--ink-muted);
+  margin: 0 0 20px;
+  line-height: 1.6;
+}
+
+.qr-card-img {
+  width: 200px;
+  height: 200px;
+  border-radius: 10px;
+  display: block;
+  margin: 0 auto 12px;
+}
+
+.qr-card-url {
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-family: "Consolas", monospace;
+  word-break: break-all;
+}
+
+.qr-connecting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 0;
+  color: var(--accent);
+  font-size: 14px;
+}
+
+.btn-skip {
+  padding: 6px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-skip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 </style>

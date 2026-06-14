@@ -132,13 +132,14 @@ async def websocket_chat(websocket: WebSocket):
                     print(f"场景提示词已更新: {system_prompt[:50]}...")
 
             elif msg_type == "scene_monitor":
-                # 场景监控：定期分析画面，AI 判断是否切换场景
+                # 场景监控：定期分析画面，AI 判断是否切换场景 + 手势识别
                 image_base64 = msg_data.get("image")
                 scenes = msg_data.get("scenes", [])
                 current_scene = msg_data.get("current_scene", "")
+                is_locked = msg_data.get("is_locked", False)
                 if image_base64:
                     asyncio.create_task(
-                        handle_scene_monitor(websocket, image_base64, scenes, current_scene)
+                        handle_scene_monitor(websocket, image_base64, scenes, current_scene, is_locked)
                     )
 
     except WebSocketDisconnect:
@@ -449,6 +450,11 @@ async def handle_qwen_audio_stream(ws: WebSocket, session, audio_base64: str):
         pass
 
 
+# Qwen 视觉响应计数：累计 N 帧后自动触发描述（不依赖语音）
+_qwen_image_count = 0
+_QWEN_VISION_INTERVAL = 10  # 每 10 帧触发一次视觉描述
+
+
 async def handle_qwen_image_stream(ws: WebSocket, session, image_base64: str):
     """处理 Qwen 实时图像流"""
     from ..services.qwen_service import qwen_realtime_service
@@ -457,8 +463,15 @@ async def handle_qwen_image_stream(ws: WebSocket, session, image_base64: str):
     if settings.MODEL_PROVIDER != "qwen" or not qwen_realtime_service.connected:
         return
 
+    global _qwen_image_count
     try:
         await qwen_realtime_service.append_image(image_base64)
+        _qwen_image_count += 1
+
+        # 累计足够帧数后，触发 AI 描述画面（不依赖语音）
+        if _qwen_image_count >= _QWEN_VISION_INTERVAL:
+            _qwen_image_count = 0
+            await qwen_realtime_service.create_response()
     except Exception:
         pass
 
@@ -470,6 +483,9 @@ async def handle_qwen_audio_end(ws: WebSocket, session):
 
     if settings.MODEL_PROVIDER != "qwen" or not qwen_realtime_service.connected:
         return
+
+    global _qwen_image_count
+    _qwen_image_count = 0  # 重置视觉计数器，避免重复触发
 
     try:
         # 1. 显式提交音频缓冲区
@@ -486,58 +502,181 @@ async def handle_qwen_audio_end(ws: WebSocket, session):
 _scene_cache = {"last_scene": ""}
 
 
-async def handle_scene_monitor(ws: WebSocket, image_base64: str, scenes: list, current_scene: str):
-    """场景监控：AI 分析画面，判断应切换到哪个场景"""
+async def handle_scene_monitor(ws: WebSocket, image_base64: str, scenes: list, current_scene: str, is_locked: bool = False):
+    """场景监控 + 手势识别：根据锁定状态使用不同 prompt（MiMo & Qwen 通用）"""
     from openai import AsyncOpenAI
     from ..config import settings
 
-    if not settings.QWEN_API_KEY or not scenes:
+    if not scenes:
         return
 
+    scene_names = [s.get("name", "") for s in scenes if s.get("name")]
+    scene_list_str = "、".join(scene_names)
+
     try:
-        # 构建场景列表供 AI 选择
-        scene_names = [s.get("name", "") for s in scenes if s.get("name")]
-        scene_list_str = "、".join(scene_names)
+        # 根据模型提供商选择 client
+        if settings.MODEL_PROVIDER == "qwen":
+            if not settings.QWEN_API_KEY:
+                return
+            client = AsyncOpenAI(
+                api_key=settings.QWEN_API_KEY,
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+            )
+            model = "qwen3.6-flash"
+        else:
+            # MiMo
+            key = settings.MIMO_API_KEY
+            if not key:
+                return
+            client = AsyncOpenAI(
+                api_key=key,
+                base_url=settings.OPENAI_BASE_URL
+            )
+            model = settings.VISION_MODEL or "gpt-4o-mini"
 
-        client = AsyncOpenAI(
-            api_key=settings.QWEN_API_KEY,
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
-        )
-        response = await client.chat.completions.create(
-            model="qwen-vl-plus",
-            messages=[
-                {"role": "system", "content": f"""你是一个场景识别助手。根据摄像头画面，判断当前最适合的场景模式。
+        if is_locked:
+            # ── 锁定状态：只检测剪刀手解锁手势 ──
+            prompt = """你是一个视觉分析助手。当前系统处于锁定状态。
+观察画面中是否有剪刀手或V字手势（食指和中指张开，其余手指收拢）。
+- 如果有剪刀手/V字手势，回复：解锁
+- 如果没有，回复：无"""
+            user_text = "画面中是否有剪刀手或V字手势？"
+            max_t = 10
+        else:
+            # ── 未锁定状态：先检测大拇指锁定，没有则判断场景 ──
+            prompt = f"""你是一个视觉分析助手。完成以下两步：
 
+第一步：观察画面中是否有竖大拇指手势（握拳，拇指朝上伸出）。
+- 如果有，回复：锁定
+- 如果没有，继续第二步。
+
+第二步：判断当前最适合的场景。
 可选场景：{scene_list_str}
 当前场景：{current_scene}
+- 如果不变，回复：不变
+- 如果适合其他场景，回复场景名称。
 
-规则：
-- 只回复场景名称，不要其他内容
-- 如果画面内容与当前场景匹配，回复"不变"
-- 如果画面更适合其他场景，回复那个场景的名称
-- 根据画面内容判断，不要猜测"""},
+回复格式（严格遵守）：
+<锁定/不变/场景名称>"""
+            user_text = "分析画面，判断手势和场景。"
+            max_t = 20
+
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": prompt},
                 {"role": "user", "content": [
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}},
-                    {"type": "text", "text": "当前画面适合什么场景？"}
+                    {"type": "text", "text": user_text}
                 ]}
             ],
-            max_tokens=20,
+            max_tokens=max_t,
         )
         result = response.choices[0].message.content.strip()
 
-        # 如果 AI 建议切换（不是"不变"且不是当前场景）
-        if result and result != "不变" and result != current_scene:
-            # 验证是有效场景名
-            matched = next((s for s in scenes if s.get("name") == result), None)
-            if matched and result != _scene_cache["last_scene"]:
-                _scene_cache["last_scene"] = result
-                await ws.send_json({
-                    "type": "scene_detected",
-                    "data": {"scene": matched["id"], "name": result}
-                })
-                print(f"[Scene] AI 建议切换: {result}")
+        if is_locked:
+            # 锁定状态：只关心"解锁"
+            if "解锁" in result or result.lower().startswith("unlock"):
+                await ws.send_json({"type": "gesture_result", "data": {"result": "unlock"}})
+                print(f"[Gesture] 检测到解锁手势")
         else:
-            _scene_cache["last_scene"] = current_scene
+            # 未锁定状态：先看是否锁定，再看场景
+            if "锁定" in result or result.lower().startswith("lock"):
+                await ws.send_json({"type": "gesture_result", "data": {"result": "lock"}})
+                print(f"[Gesture] 检测到锁定手势")
+            elif result and result != "不变" and result != current_scene:
+                matched = next((s for s in scenes if s.get("name") == result), None)
+                if matched and result != _scene_cache["last_scene"]:
+                    _scene_cache["last_scene"] = result
+                    await ws.send_json({
+                        "type": "scene_detected",
+                        "data": {"scene": matched["id"], "name": result}
+                    })
+                    print(f"[Scene] AI 建议切换: {result}")
+            else:
+                _scene_cache["last_scene"] = current_scene
 
     except Exception as e:
-        print(f"场景监控错误: {e}")
+        err = str(e)
+        if not any(x in err for x in ('401', '403', '404', 'invalid_api_key', 'model_not_found')):
+            print(f"场景监控错误: {e}")
+
+
+# ═══════════════════════════════════════════
+#  WebRTC 信令中继 — 手机摄像头 → PC
+# ═══════════════════════════════════════════
+# 内存字典：{ session_id: { "phone": ws, "pc": ws } }
+camera_sessions = {}
+
+
+@router.websocket("/ws/camera")
+async def websocket_camera(websocket: WebSocket):
+    """WebRTC 信令中继 — 手机摄像头与 PC 之间的 SDP/ICE 转发"""
+    await websocket.accept()
+    my_session = None
+    my_role = None
+
+    try:
+        while True:
+            data = await websocket.receive_json()
+            msg_type = data.get("type")
+            msg_data = data.get("data", {})
+
+            if msg_type == "camera_register":
+                # 手机端注册
+                sid = msg_data.get("session")
+                if sid:
+                    my_session = sid
+                    my_role = "phone"
+                    if sid not in camera_sessions:
+                        camera_sessions[sid] = {}
+                    camera_sessions[sid]["phone"] = websocket
+                    await websocket.send_json({"type": "camera_registered", "data": {}})
+                    print(f"[Camera] 手机已注册: {sid}")
+
+            elif msg_type == "camera_connect":
+                # PC 端连接，等待信令
+                sid = msg_data.get("session")
+                if sid:
+                    my_session = sid
+                    my_role = "pc"
+                    if sid not in camera_sessions:
+                        camera_sessions[sid] = {}
+                    camera_sessions[sid]["pc"] = websocket
+                    phone_ws = camera_sessions[sid].get("phone")
+                    if phone_ws:
+                        await websocket.send_json({"type": "camera_ready", "data": {"session": sid}})
+                        await phone_ws.send_json({"type": "camera_start", "data": {}})
+                    print(f"[Camera] PC 已连接: {sid}")
+
+            elif msg_type in ("webrtc_offer", "webrtc_answer", "webrtc_ice"):
+                # 转发 SDP / ICE 给对方
+                if not my_session:
+                    continue
+                session_entry = camera_sessions.get(my_session, {})
+                target = "pc" if my_role == "phone" else "phone"
+                target_ws = session_entry.get(target)
+                if target_ws:
+                    # 稍作转换以统一格式
+                    if msg_type == "webrtc_offer":
+                        await target_ws.send_json({"type": "webrtc_offer", "data": msg_data.get("sdp")})
+                    elif msg_type == "webrtc_answer":
+                        await target_ws.send_json({"type": "webrtc_answer", "data": msg_data.get("sdp")})
+                    elif msg_type == "webrtc_ice":
+                        await target_ws.send_json({"type": "webrtc_ice", "data": msg_data.get("candidate")})
+
+    except Exception as e:
+        print(f"[Camera] 连接异常: {e}")
+    finally:
+        # 清理
+        if my_session and my_session in camera_sessions:
+            entry = camera_sessions[my_session]
+            if my_role == "phone":
+                pc_ws = entry.get("pc")
+                if pc_ws:
+                    try: await pc_ws.send_json({"type": "camera_disconnect", "data": {}})
+                    except: pass
+            entry.pop(my_role, None)
+            if not entry:
+                camera_sessions.pop(my_session, None)
+            print(f"[Camera] {my_role} 断开: {my_session}")
