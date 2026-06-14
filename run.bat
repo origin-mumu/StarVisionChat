@@ -1,6 +1,6 @@
 @echo off
 echo ========================================
-echo   StarVisionChat - AI 视觉对话助手
+echo   灵眸星视 - AI 视界助理
 echo ========================================
 echo.
 
@@ -47,7 +47,7 @@ echo 按 Ctrl+C 停止服务
 echo.
 
 REM 启动后端（新窗口）
-start "StarVisionChat Backend" cmd /k "cd backend && python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000"
+start "灵眸星视 Backend" cmd /k "cd backend && python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000"
 
 REM 等待后端启动
 timeout /t 3 /nobreak >nul

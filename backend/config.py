@@ -1,5 +1,5 @@
 """
-StarVisionChat 配置管理
+灵眸星视 配置管理
 支持 MiMo 和 Qwen-Omni-Realtime 双模型
 """
 import os
@@ -15,7 +15,7 @@ class Settings:
     """应用配置"""
 
     # 应用基础配置
-    APP_NAME: str = "StarVisionChat"
+    APP_NAME: str = "灵眸星视"
     APP_VERSION: str = "0.3.0"
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
 

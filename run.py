@@ -1,5 +1,5 @@
 """
-StarVisionChat 启动脚本
+灵眸星视 启动脚本
 """
 import sys
 import os
@@ -12,7 +12,7 @@ from backend.config import settings
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  StarVisionChat - AI Visual Dialogue Assistant")
+    print("  灵眸星视 - AI 视界助理")
     print("=" * 60)
     print(f"  Backend:  http://{settings.HOST}:{settings.PORT}")
     print(f"  API Docs: http://{settings.HOST}:{settings.PORT}/docs")
