@@ -89,10 +89,27 @@ const SCENE_MODES = {
 语调：像夜晚的轻声细语，让人感到安心和平静。`,
     autoSwitchHints: ['休息', '睡觉', '失眠', '放松', '冥想', '压力', '焦虑', '累'],
   },
+  style: {
+    id: 'style',
+    name: '穿搭助手',
+    icon: 'Present',
+    color: '#D4638F',
+    description: '穿搭建议，场合推荐',
+    systemPrompt: `你是一位专业的穿搭顾问和形象设计师。
+你的任务是：
+1. 查看用户展示的衣物、配饰，分析颜色、款式、材质
+2. 根据当前衣物给出搭配建议（上下装、鞋帽、包袋等）
+3. 推荐适合的场合（日常通勤、约会、面试、聚会等）
+4. 分析颜色搭配是否协调，给出优化建议
+5. 如果用户有多件衣物，帮忙组合出最佳搭配方案
+回复风格：时尚、细致、有品位，像私人造型师一样给出建议。
+对于每件衣物，先描述你看到的（颜色、款式、材质），再给出搭配建议。`,
+    autoSwitchHints: ['穿搭', '搭配', '衣服', '穿什么', '这件', '裙子', '裤子', '外套', '鞋子', '包包', '配饰', '时尚', '造型'],
+  },
 }
 
 // 场景顺序（用于 UI 显示）
-const SCENE_ORDER = ['companion', 'interview', 'health', 'learning', 'rest']
+const SCENE_ORDER = ['companion', 'interview', 'health', 'learning', 'rest', 'style']
 const CUSTOM_SCENES_KEY = 'starvisionchat_custom_scenes'
 
 function loadScene() {
@@ -233,7 +250,9 @@ export const useSceneStore = defineStore('scene', () => {
 
     // 书本/题目 → 学习模式
     if (desc.includes('书') || desc.includes('题') || desc.includes('公式') ||
-        desc.includes('作业') || desc.includes('book') || desc.includes('homework')) {
+        desc.includes('作业') || desc.includes('试卷') || desc.includes('考试') ||
+        desc.includes('课本') || desc.includes('笔记') || desc.includes('book') ||
+        desc.includes('homework') || desc.includes('exam') || desc.includes('test')) {
       if (currentSceneId.value !== 'learning') return 'learning'
     }
 
@@ -247,6 +266,18 @@ export const useSceneStore = defineStore('scene', () => {
     if (desc.includes('床') || desc.includes('枕头') || desc.includes('夜晚') ||
         desc.includes('bed') || desc.includes('night')) {
       if (currentSceneId.value !== 'rest') return 'rest'
+    }
+
+    // 衣物饰品 → 穿搭助手
+    if (desc.includes('衣服') || desc.includes('裙子') || desc.includes('裤子') ||
+        desc.includes('外套') || desc.includes('鞋子') || desc.includes('包包') ||
+        desc.includes('帽子') || desc.includes('围巾') || desc.includes('首饰') ||
+        desc.includes('眼镜') || desc.includes('手套') || desc.includes('搭配') ||
+        desc.includes('服装') || desc.includes('衬衫') || desc.includes('T恤') ||
+        desc.includes('毛衣') || desc.includes('大衣') || desc.includes('西装') ||
+        desc.includes('clothing') || desc.includes('dress') || desc.includes('shirt') ||
+        desc.includes('shoes') || desc.includes('fashion') || desc.includes('outfit')) {
+      if (currentSceneId.value !== 'style') return 'style'
     }
 
     return null

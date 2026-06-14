@@ -16,7 +16,7 @@ const showApiKey = ref(false)
 const showQwenApiKey = ref(false)
 
 /* ─── Model provider ─── */
-const modelProvider = ref('mimo')  // mimo / qwen
+const modelProvider = ref('qwen')  // qwen / mimo
 
 /* ─── MiMo fields ─── */
 const apiKey = ref('')
@@ -62,7 +62,7 @@ onMounted(() => {
   if (saved) {
     try {
       const config = JSON.parse(saved)
-      modelProvider.value = config.modelProvider || 'mimo'
+      modelProvider.value = config.modelProvider || 'qwen'
 
       // MiMo config
       apiKey.value = config.apiKey || ''
@@ -184,17 +184,17 @@ function goBack() {
           <div class="provider-tabs">
             <button
               class="provider-tab"
-              :class="{ active: modelProvider === 'mimo' }"
-              @click="modelProvider = 'mimo'"
-            >
-              MiMo
-            </button>
-            <button
-              class="provider-tab"
               :class="{ active: modelProvider === 'qwen' }"
               @click="modelProvider = 'qwen'"
             >
               Qwen
+            </button>
+            <button
+              class="provider-tab"
+              :class="{ active: modelProvider === 'mimo' }"
+              @click="modelProvider = 'mimo'"
+            >
+              MiMo
             </button>
           </div>
         </div>
