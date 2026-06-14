@@ -2,6 +2,7 @@
 WebSocket 路由
 处理实时音视频通信
 """
+import re
 import json
 import uuid
 import asyncio
@@ -11,6 +12,28 @@ from ..services.session_manager import session_manager
 from ..models.schemas import MessageType, StatusType
 
 router = APIRouter()
+
+
+def strip_markdown(text: str) -> str:
+    """清理 Markdown 格式，保留纯文本用于 TTS 合成"""
+    text = re.sub(r'```[\s\S]*?```', lambda m: m.group(0).replace('```', ''), text)  # 代码块内容保留
+    text = re.sub(r'```', '', text)
+    text = re.sub(r'`([^`]+)`', r'\1', text)        # 行内代码
+    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)  # 标题
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # 加粗
+    text = re.sub(r'\*([^*]+)\*', r'\1', text)       # 斜体
+    text = re.sub(r'__([^_]+)__', r'\1', text)       # 加粗
+    text = re.sub(r'_([^_]+)_', r'\1', text)         # 斜体
+    text = re.sub(r'~~([^~]+)~~', r'\1', text)       # 删除线
+    text = re.sub(r'^>\s+', '', text, flags=re.MULTILINE)  # 引用
+    text = re.sub(r'^[-*+]\s+', '', text, flags=re.MULTILINE)  # 无序列表
+    text = re.sub(r'^\d+\.\s+', '', text, flags=re.MULTILINE)  # 有序列表
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)  # 链接
+    text = re.sub(r'!\[([^\]]*)\]\([^)]+\)', r'\1', text)  # 图片
+    text = re.sub(r'\|', ' ', text)                  # 表格竖线
+    text = re.sub(r'^-{3,}$', '', text, flags=re.MULTILINE)  # 分割线
+    text = re.sub(r'\n{3,}', '\n\n', text)           # 多空行
+    return text.strip()
 
 
 async def send_status(ws: WebSocket, status: StatusType, message: str = None):
@@ -103,11 +126,21 @@ async def websocket_chat(websocket: WebSocket):
                     handle_qwen_audio_end(websocket, session)
                 )
 
+            elif msg_type == "qwen_scene_switch":
+                # Qwen 模式：场景切换，打断当前回复并用新场景重新生成
+                scene_prompt = msg_data.get("system_prompt", "")
+                if scene_prompt:
+                    asyncio.create_task(
+                        handle_qwen_scene_switch(websocket, session, scene_prompt)
+                    )
+
             elif msg_type == MessageType.AUDIO_END:
-                # 音频结束，进行识别（可选附带图像帧）
+                # 音频结束，进行识别（可选附带图像帧 + 场景数据）
                 image_base64 = msg_data.get("image")
+                scenes = msg_data.get("scenes", [])
+                current_scene = msg_data.get("current_scene", "")
                 asyncio.create_task(
-                    process_speech(websocket, session, image_base64)
+                    process_speech(websocket, session, image_base64, scenes, current_scene)
                 )
 
             elif msg_type == MessageType.TEXT_INPUT:
@@ -241,11 +274,12 @@ async def process_vision(ws: WebSocket, session, image_base64: str):
         session.status = StatusType.IDLE
 
 
-async def process_speech(ws: WebSocket, session, image_base64: str = None):
-    """处理语音识别（可选附带图像帧）"""
+async def process_speech(ws: WebSocket, session, image_base64: str = None, scenes: list = None, current_scene: str = ""):
+    """处理语音识别（可选附带图像帧 + 场景数据）"""
     from ..services.stt_service import stt_service
     from ..services.tts_service import tts_service
     from ..services.llm_service import llm_service
+    from ..config import settings
 
     try:
         session.status = StatusType.PROCESSING_STT
@@ -266,6 +300,24 @@ async def process_speech(ws: WebSocket, session, image_base64: str = None):
             "type": MessageType.AI_RESPONSE,
             "data": {"text": text, "is_user": True, "is_streaming": False}
         })
+
+        # ── 场景关键词检测（在调 LLM 之前）──
+        if scenes:
+            text_lower = text.lower()
+            for scene in scenes:
+                keywords = scene.get("keywords", [])
+                if any(kw in text_lower for kw in keywords):
+                    scene_id = scene.get("id", "")
+                    scene_name = scene.get("name", "")
+                    scene_prompt = scene.get("systemPrompt", "")
+                    if scene_id and scene_id != current_scene and scene_prompt:
+                        settings.SYSTEM_PROMPT = scene_prompt
+                        await ws.send_json({
+                            "type": "scene_detected",
+                            "data": {"scene": scene_id, "name": scene_name}
+                        })
+                        print(f"[Scene] 语音检测到场景切换: {scene_name}")
+                    break
 
         # 调用 LLM 生成回复
         session.status = StatusType.THINKING
@@ -291,7 +343,7 @@ async def process_speech(ws: WebSocket, session, image_base64: str = None):
         session.status = StatusType.SPEAKING
         await send_status(ws, StatusType.SPEAKING, "正在回复...")
 
-        audio_base64 = await tts_service.synthesize(response)
+        audio_base64 = await tts_service.synthesize(strip_markdown(response))
 
         if audio_base64:
             session.update_cost("tts_chars", len(response))
@@ -357,7 +409,7 @@ async def process_text(ws: WebSocket, session, text: str, image_base64: str = No
             session.status = StatusType.SPEAKING
             await send_status(ws, StatusType.SPEAKING, "正在回复...")
 
-            audio_base64 = await tts_service.synthesize(response)
+            audio_base64 = await tts_service.synthesize(strip_markdown(response))
 
             if audio_base64:
                 session.update_cost("tts_chars", len(response))
@@ -498,6 +550,27 @@ async def handle_qwen_audio_end(ws: WebSocket, session):
         print(f"Qwen audio end 处理错误: {e}")
 
 
+async def handle_qwen_scene_switch(ws: WebSocket, session, system_prompt: str):
+    """Qwen 模式：场景切换 — 打断当前回复，更新提示词，重新生成"""
+    from ..services.qwen_service import qwen_realtime_service
+    from ..config import settings
+
+    if settings.MODEL_PROVIDER != "qwen" or not qwen_realtime_service.connected:
+        return
+
+    try:
+        # 1. 打断当前回复
+        await qwen_realtime_service.cancel_response()
+        # 2. 更新系统提示词
+        settings.SYSTEM_PROMPT = system_prompt
+        await qwen_realtime_service.update_instructions(system_prompt)
+        # 3. 重新生成回复
+        await qwen_realtime_service.create_response()
+        print(f"[Qwen] 场景切换完成，重新生成回复")
+    except Exception as e:
+        print(f"Qwen 场景切换错误: {e}")
+
+
 # ─── 场景监控 ───
 _scene_cache = {"last_scene": ""}
 
@@ -530,9 +603,9 @@ async def handle_scene_monitor(ws: WebSocket, image_base64: str, scenes: list, c
                 return
             client = AsyncOpenAI(
                 api_key=key,
-                base_url=settings.OPENAI_BASE_URL
+                base_url=settings.MIMO_BASE_URL
             )
-            model = settings.VISION_MODEL or "gpt-4o-mini"
+            model = settings.CHAT_MODEL or "mimo-v2.5"
 
         if is_locked:
             # ── 锁定状态：只检测剪刀手解锁手势 ──

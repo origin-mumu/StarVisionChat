@@ -68,7 +68,7 @@ const chatCollapsed = ref(false); // 侧边栏折叠
 const memoryNotification = ref("");
 const sceneSuggestion = ref(null); // { sceneName }
 let sceneMonitorTimer = null;
-const SCENE_MONITOR_INTERVAL = 4000; // 8秒检测一次
+const SCENE_MONITOR_INTERVAL = 2000;
 
 // 自定义场景
 const showAddScene = ref(false);
@@ -267,9 +267,12 @@ const cameraLoading = ref(false);
 const gesture = useGesture();
 
 // 手势锁定 → 同步到场景自动切换
-watch(() => gesture.isLocked.value, (locked) => {
-  sceneStore.isAutoSwitchEnabled = !locked;
-});
+watch(
+  () => gesture.isLocked.value,
+  (locked) => {
+    sceneStore.isAutoSwitchEnabled = !locked;
+  },
+);
 
 // 远程摄像头：切换到手机的 video 流
 watch(remoteStream, (stream) => {
@@ -381,7 +384,10 @@ function initSpeech() {
 let autoVoiceTimer = null;
 function autoContinueVoice() {
   if (!continuousMode.value) return;
-  if (autoVoiceTimer) { clearTimeout(autoVoiceTimer); autoVoiceTimer = null }
+  if (autoVoiceTimer) {
+    clearTimeout(autoVoiceTimer);
+    autoVoiceTimer = null;
+  }
   autoVoiceTimer = setTimeout(() => {
     autoVoiceTimer = null;
     // 再次检查状态，防止竞态
@@ -397,7 +403,10 @@ async function toggleVoice() {
   if (!speechSupported.value) return;
 
   // 用户手动点击语音按钮时，取消自动触发
-  if (autoVoiceTimer) { clearTimeout(autoVoiceTimer); autoVoiceTimer = null }
+  if (autoVoiceTimer) {
+    clearTimeout(autoVoiceTimer);
+    autoVoiceTimer = null;
+  }
 
   // 重新加载模型配置（可能在设置面板中被修改）
   const saved = localStorage.getItem("starvisionchat_config");
@@ -641,10 +650,19 @@ async function sendVoiceAudio(audioBlob) {
     // 捕获当前摄像头帧
     const frame = captureFrame();
 
-    // Send audio via WebSocket（附带当前帧）
+    // Send audio via WebSocket（附带当前帧 + 场景数据，供后端在调 LLM 前检测场景）
     setMode("thinking");
     wsService.sendAudioChunk(b64);
-    wsService.sendAudioEnd(frame);
+    wsService.send("audio_end", {
+      image: frame,
+      scenes: sceneStore.scenes.map(s => ({
+        id: s.id,
+        name: s.name,
+        systemPrompt: s.systemPrompt,
+        keywords: s.autoSwitchHints || [],
+      })),
+      current_scene: sceneStore.currentSceneId,
+    });
   } catch {
     setMode("idle");
   }
@@ -722,16 +740,21 @@ function checkAutoSwitch(text) {
 /* ─── Scene Monitor（定时截帧检测场景变化） ─── */
 function startSceneMonitor() {
   stopSceneMonitor();
+  console.log("[SceneMonitor] 启动场景监控，间隔:", SCENE_MONITOR_INTERVAL, "ms");
   sceneMonitorTimer = setInterval(() => {
-    if (!isCameraOn.value && !remoteStream.value) return;
+    const camOn = isCameraOn.value || !!remoteStream.value;
+    if (!camOn) return;
     const frame = captureFrame();
     if (frame) {
+      console.log("[SceneMonitor] 发送场景监控帧，长度:", frame.length);
       wsService.send("scene_monitor", {
         image: frame,
         scenes: sceneStore.scenes.map((s) => ({ id: s.id, name: s.name })),
         current_scene: sceneStore.currentScene.name,
         is_locked: gesture.isLocked.value,
       });
+    } else {
+      console.log("[SceneMonitor] captureFrame 返回空");
     }
   }, SCENE_MONITOR_INTERVAL);
 }
@@ -835,11 +858,23 @@ let qwenAudioQueue = [];
 let qwenIsPlaying = false;
 let qwenTextBuffer = ""; // 缓冲 AI 文本，等用户转录显示后再显示
 let qwenTranscriptReceived = false; // 是否已收到用户转录
+let qwenSceneSwitching = false;    // 场景切换中，丢弃旧回复的残余数据
 
 function handleQwenTextDelta(data) {
   // 流式追加文本到当前 AI 回复
   const text = data.text || "";
   if (!text) return;
+
+  // 场景切换中，丢弃旧回复的残余数据
+  if (qwenSceneSwitching) {
+    qwenSceneSwitching = false; // 新回复开始，清除标志
+    // 删除旧的 AI 消息（如果还在）
+    const messages = chatStore.messages;
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg && !lastMsg.isUser) {
+      messages.pop();
+    }
+  }
 
   // 如果用户转录还没显示，先缓冲
   if (!qwenTranscriptReceived) {
@@ -933,8 +968,29 @@ function handleQwenTranscript(data) {
   // 用户语音转录完成
   const text = data.text || "";
   if (text) {
-    // 自动检测场景切换
-    checkAutoSwitch(text);
+    // Qwen 模式场景切换：检测到关键词后打断当前回复，用新场景重新生成
+    const suggestedScene = sceneStore.detectScene(text);
+    if (suggestedScene) {
+      // 清空旧的 AI 回复状态
+      qwenTextBuffer = "";
+      qwenAudioQueue = [];
+      qwenIsPlaying = false;
+      qwenSceneSwitching = true; // 标记切换中，丢弃旧回复残余数据
+      // 删除上一条 AI 消息（如果有未完成的残余文本）
+      const messages = chatStore.messages;
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg && !lastMsg.isUser) {
+        messages.pop();
+      }
+
+      sceneStore.switchScene(suggestedScene);
+      wsService.send("qwen_scene_switch", {
+        system_prompt: sceneStore.systemPrompt,
+      });
+      // 显示切换通知
+      sceneSuggestion.value = { sceneName: sceneStore.currentScene.name };
+      setTimeout(() => { sceneSuggestion.value = null; }, 3000);
+    }
 
     // 标记已收到用户转录
     qwenTranscriptReceived = true;
@@ -959,10 +1015,12 @@ function handleQwenResponseDone() {
     stt_calls: chatStore.costData.stt_calls + 1,
     llm_tokens: chatStore.costData.llm_tokens + estimatedTokens,
   });
+  // 先刷新缓冲文本，再重置状态（场景切换后新回复的文本可能还在缓冲区）
+  flushQwenTextBuffer();
   qwenTurnInputLen = 0;
   qwenIsPlaying = false;
   qwenTranscriptReceived = false;
-  qwenTextBuffer = "";
+  // 注意：qwenSceneSwitching 不在这里重置，由 handleQwenTextDelta 在新回复到达时处理
   setMode("idle");
 }
 
@@ -1577,7 +1635,6 @@ onMounted(() => {
   wsService.on("gesture_result", (data) => gesture.handleResult(data.result));
 });
 
-
 onBeforeUnmount(() => {
   cancelAnimationFrame(animId);
   window.removeEventListener("resize", resizeMain);
@@ -1585,7 +1642,10 @@ onBeforeUnmount(() => {
   themeObserver.disconnect();
   if (silenceTimer) clearTimeout(silenceTimer);
   if (typewriterTimer) clearInterval(typewriterTimer);
-  if (autoVoiceTimer) { clearTimeout(autoVoiceTimer); autoVoiceTimer = null; }
+  if (autoVoiceTimer) {
+    clearTimeout(autoVoiceTimer);
+    autoVoiceTimer = null;
+  }
   if (currentAudio) {
     currentAudio.pause();
     currentAudio = null;
@@ -1715,7 +1775,12 @@ watch(videoMain, (isMain) => {
             :style="{ backgroundColor: sceneStore.currentScene.color }"
           ></span>
           <span class="scene-name">{{ sceneStore.currentScene.name }}</span>
-          <span v-if="gesture.isLocked.value" class="lock-badge" title="场景已锁定，不会自动切换"><el-icon><Lock /></el-icon></span>
+          <span
+            v-if="gesture.isLocked.value"
+            class="lock-badge"
+            title="场景已锁定，不会自动切换"
+            ><el-icon><Lock /></el-icon
+          ></span>
         </div>
       </div>
       <div class="top-actions">
@@ -1731,11 +1796,11 @@ watch(videoMain, (isMain) => {
                 />
                 <span>自动切换</span>
               </label>
-              <label class="auto-switch-toggle" title="AI说完后自动开始语音录入">
-                <input
-                  type="checkbox"
-                  v-model="continuousMode"
-                />
+              <label
+                class="auto-switch-toggle"
+                title="AI说完后自动开始语音录入"
+              >
+                <input type="checkbox" v-model="continuousMode" />
                 <span>连续对话</span>
               </label>
             </div>
