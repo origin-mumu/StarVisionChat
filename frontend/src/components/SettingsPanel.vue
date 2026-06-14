@@ -21,77 +21,20 @@
             <div class="provider-tabs">
               <button
                 class="provider-tab"
-                :class="{ active: modelProvider === 'mimo' }"
-                @click="modelProvider = 'mimo'"
-              >
-                MiMo
-              </button>
-              <button
-                class="provider-tab"
                 :class="{ active: modelProvider === 'qwen' }"
                 @click="modelProvider = 'qwen'"
               >
                 Qwen
               </button>
+              <button
+                class="provider-tab"
+                :class="{ active: modelProvider === 'mimo' }"
+                @click="modelProvider = 'mimo'"
+              >
+                MiMo
+              </button>
             </div>
           </div>
-
-          <!-- MiMo Config -->
-          <template v-if="modelProvider === 'mimo'">
-            <div class="section-label">
-              <span class="section-line"></span>
-              <span class="section-text">MiMo 配置</span>
-              <span class="section-line"></span>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label text-caption">API Key <span class="required">*</span></label>
-              <div class="input-with-toggle">
-                <input
-                  v-model="apiKey"
-                  :type="showApiKey ? 'text' : 'password'"
-                  class="input-field"
-                  placeholder="输入你的 MiMo API Key"
-                />
-                <button class="btn-icon toggle-btn" @click="showApiKey = !showApiKey">
-                  <el-icon v-if="showApiKey"><Hide /></el-icon>
-                  <el-icon v-else><View /></el-icon>
-                </button>
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label text-caption">Base URL</label>
-              <input v-model="baseUrl" class="input-field" placeholder="https://token-plan-cn.xiaomimimo.com/v1" />
-              <span class="form-hint">TokenPlan 会员专属地址</span>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label text-caption">对话模型</label>
-              <input v-model="chatModel" class="input-field input-readonly" readonly />
-            </div>
-
-            <div class="form-group">
-              <label class="form-label text-caption">语音识别</label>
-              <input v-model="asrModel" class="input-field input-readonly" readonly />
-            </div>
-
-            <div class="form-group">
-              <label class="form-label text-caption">语音合成</label>
-              <input v-model="ttsModel" class="input-field input-readonly" readonly />
-            </div>
-
-            <div class="form-group">
-              <label class="form-label text-caption">TTS 音色</label>
-              <div class="select-wrapper">
-                <select v-model="ttsVoice" class="input-field select-field">
-                  <option v-for="opt in ttsVoiceOptions" :key="opt.value" :value="opt.value">
-                    {{ opt.label }}
-                  </option>
-                </select>
-              </div>
-            </div>
-          </template>
 
           <!-- Qwen Config -->
           <template v-if="modelProvider === 'qwen'">
@@ -146,6 +89,63 @@
                 <select v-model="qwenRegion" class="input-field select-field">
                   <option value="cn">华北2（北京）</option>
                   <option value="intl">新加坡</option>
+                </select>
+              </div>
+            </div>
+          </template>
+
+          <!-- MiMo Config -->
+          <template v-if="modelProvider === 'mimo'">
+            <div class="section-label">
+              <span class="section-line"></span>
+              <span class="section-text">MiMo 配置</span>
+              <span class="section-line"></span>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label text-caption">API Key <span class="required">*</span></label>
+              <div class="input-with-toggle">
+                <input
+                  v-model="apiKey"
+                  :type="showApiKey ? 'text' : 'password'"
+                  class="input-field"
+                  placeholder="输入你的 MiMo API Key"
+                />
+                <button class="btn-icon toggle-btn" @click="showApiKey = !showApiKey">
+                  <el-icon v-if="showApiKey"><Hide /></el-icon>
+                  <el-icon v-else><View /></el-icon>
+                </button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label text-caption">Base URL</label>
+              <input v-model="baseUrl" class="input-field" placeholder="https://token-plan-cn.xiaomimimo.com/v1" />
+              <span class="form-hint">TokenPlan 会员专属地址</span>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label text-caption">对话模型</label>
+              <input v-model="chatModel" class="input-field input-readonly" readonly />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label text-caption">语音识别</label>
+              <input v-model="asrModel" class="input-field input-readonly" readonly />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label text-caption">语音合成</label>
+              <input v-model="ttsModel" class="input-field input-readonly" readonly />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label text-caption">TTS 音色</label>
+              <div class="select-wrapper">
+                <select v-model="ttsVoice" class="input-field select-field">
+                  <option v-for="opt in ttsVoiceOptions" :key="opt.value" :value="opt.value">
+                    {{ opt.label }}
+                  </option>
                 </select>
               </div>
             </div>

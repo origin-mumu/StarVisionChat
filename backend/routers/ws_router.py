@@ -97,6 +97,12 @@ async def websocket_chat(websocket: WebSocket):
                         handle_qwen_image_stream(websocket, session, image_base64)
                     )
 
+            elif msg_type == "audio_end_qwen":
+                # Qwen 模式：录音结束，提交缓冲区并请求模型响应
+                asyncio.create_task(
+                    handle_qwen_audio_end(websocket, session)
+                )
+
             elif msg_type == MessageType.AUDIO_END:
                 # 音频结束，进行识别（可选附带图像帧）
                 image_base64 = msg_data.get("image")
@@ -116,6 +122,24 @@ async def websocket_chat(websocket: WebSocket):
             elif msg_type == "config_update":
                 # 更新配置
                 await handle_config_update(websocket, session, msg_data)
+
+            elif msg_type == "scene_update":
+                # 更新场景模式（系统提示词）
+                system_prompt = msg_data.get("system_prompt")
+                if system_prompt:
+                    from ..config import settings
+                    settings.SYSTEM_PROMPT = system_prompt
+                    print(f"场景提示词已更新: {system_prompt[:50]}...")
+
+            elif msg_type == "scene_monitor":
+                # 场景监控：定期分析画面，AI 判断是否切换场景
+                image_base64 = msg_data.get("image")
+                scenes = msg_data.get("scenes", [])
+                current_scene = msg_data.get("current_scene", "")
+                if image_base64:
+                    asyncio.create_task(
+                        handle_scene_monitor(websocket, image_base64, scenes, current_scene)
+                    )
 
     except WebSocketDisconnect:
         print(f"客户端断开连接: {session_id}")
@@ -292,6 +316,15 @@ async def process_text(ws: WebSocket, session, text: str, image_base64: str = No
     from ..config import settings
 
     try:
+        # 先检测记忆/提醒意图
+        from ..services.memory_interceptor import process_user_message
+        memory_result = process_user_message(text)
+        if memory_result:
+            await ws.send_json({
+                "type": "memory_saved",
+                "data": {"message": memory_result}
+            })
+
         session.status = StatusType.THINKING
         await send_status(ws, StatusType.THINKING, "正在思考...")
 
@@ -345,6 +378,56 @@ async def process_text(ws: WebSocket, session, text: str, image_base64: str = No
 
 
 # ─── Qwen 实时流处理 ───
+# 连接锁：防止多个音频块同时尝试连接
+_qwen_connecting = False
+
+
+async def ensure_qwen_connected(ws: WebSocket) -> bool:
+    """确保 Qwen 服务已连接（带锁防止并发连接）"""
+    global _qwen_connecting
+    from ..services.qwen_service import qwen_realtime_service
+
+    if qwen_realtime_service.connected:
+        return True
+
+    if _qwen_connecting:
+        # 另一个块正在连接中，跳过
+        return False
+
+    _qwen_connecting = True
+    try:
+        def _on_transcript(transcript):
+            """转录回调：发送到前端 + 自动提取记忆"""
+            asyncio.create_task(
+                ws.send_json({"type": "qwen_transcript", "data": {"text": transcript, "is_user": True}})
+            )
+            # 自动检测记忆/提醒意图
+            from ..services.memory_interceptor import process_user_message
+            result = process_user_message(transcript)
+            if result:
+                print(f"[Memory] {result}")
+                asyncio.create_task(
+                    ws.send_json({"type": "memory_saved", "data": {"message": result}})
+                )
+
+        success = await qwen_realtime_service.connect(
+            on_text_delta=lambda text: asyncio.create_task(
+                ws.send_json({"type": "qwen_text_delta", "data": {"text": text}})
+            ),
+            on_audio_delta=lambda audio: asyncio.create_task(
+                ws.send_json({"type": "qwen_audio_delta", "data": {"audio": audio}})
+            ),
+            on_transcript=_on_transcript,
+            on_response_done=lambda event: asyncio.create_task(
+                ws.send_json({"type": "qwen_response_done", "data": {}})
+            ),
+        )
+        if not success:
+            await send_error(ws, "QWEN_CONNECT_ERROR", "无法连接到 Qwen 服务")
+        return success
+    finally:
+        _qwen_connecting = False
+
 
 async def handle_qwen_audio_stream(ws: WebSocket, session, audio_base64: str):
     """处理 Qwen 实时音频流"""
@@ -354,29 +437,16 @@ async def handle_qwen_audio_stream(ws: WebSocket, session, audio_base64: str):
     if settings.MODEL_PROVIDER != "qwen":
         return
 
-    # 如果未连接，建立连接
-    if not qwen_realtime_service.connected:
-        success = await qwen_realtime_service.connect(
-            on_text_delta=lambda text: asyncio.create_task(
-                ws.send_json({"type": "qwen_text_delta", "data": {"text": text}})
-            ),
-            on_audio_delta=lambda audio: asyncio.create_task(
-                ws.send_json({"type": "qwen_audio_delta", "data": {"audio": audio}})
-            ),
-            on_transcript=lambda transcript: asyncio.create_task(
-                ws.send_json({"type": "qwen_transcript", "data": {"text": transcript, "is_user": True}})
-            ),
-            on_response_done=lambda event: asyncio.create_task(
-                ws.send_json({"type": "qwen_response_done", "data": {}})
-            ),
-        )
-        if not success:
-            await send_error(ws, "QWEN_CONNECT_ERROR", "无法连接到 Qwen 服务")
-            return
+    # 确保已连接（带锁，不会并发重连）
+    if not await ensure_qwen_connected(ws):
+        return
 
-    # 从 WAV 中提取 PCM 数据再发送
-    pcm_base64 = extract_pcm_from_wav(audio_base64)
-    await qwen_realtime_service.stream_audio(pcm_base64)
+    try:
+        pcm_base64 = extract_pcm_from_wav(audio_base64)
+        await qwen_realtime_service.stream_audio(pcm_base64)
+    except Exception:
+        # 连接已断开，静默丢弃后续音频块（不要每块都尝试重连）
+        pass
 
 
 async def handle_qwen_image_stream(ws: WebSocket, session, image_base64: str):
@@ -387,4 +457,87 @@ async def handle_qwen_image_stream(ws: WebSocket, session, image_base64: str):
     if settings.MODEL_PROVIDER != "qwen" or not qwen_realtime_service.connected:
         return
 
-    await qwen_realtime_service.append_image(image_base64)
+    try:
+        await qwen_realtime_service.append_image(image_base64)
+    except Exception:
+        pass
+
+
+async def handle_qwen_audio_end(ws: WebSocket, session):
+    """Qwen Manual 模式：录音结束 → 提交缓冲区 → 等待转录 → 请求模型响应"""
+    from ..services.qwen_service import qwen_realtime_service
+    from ..config import settings
+
+    if settings.MODEL_PROVIDER != "qwen" or not qwen_realtime_service.connected:
+        return
+
+    try:
+        # 1. 显式提交音频缓冲区
+        await qwen_realtime_service.commit()
+        # 2. 等待转录完成
+        await qwen_realtime_service.wait_transcription(timeout=10)
+        # 3. 请求模型响应
+        await qwen_realtime_service.create_response()
+    except Exception as e:
+        print(f"Qwen audio end 处理错误: {e}")
+
+
+# ─── 场景监控 ───
+_scene_cache = {"last_scene": ""}
+
+
+async def handle_scene_monitor(ws: WebSocket, image_base64: str, scenes: list, current_scene: str):
+    """场景监控：AI 分析画面，判断应切换到哪个场景"""
+    from openai import AsyncOpenAI
+    from ..config import settings
+
+    if not settings.QWEN_API_KEY or not scenes:
+        return
+
+    try:
+        # 构建场景列表供 AI 选择
+        scene_names = [s.get("name", "") for s in scenes if s.get("name")]
+        scene_list_str = "、".join(scene_names)
+
+        client = AsyncOpenAI(
+            api_key=settings.QWEN_API_KEY,
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
+        response = await client.chat.completions.create(
+            model="qwen-vl-plus",
+            messages=[
+                {"role": "system", "content": f"""你是一个场景识别助手。根据摄像头画面，判断当前最适合的场景模式。
+
+可选场景：{scene_list_str}
+当前场景：{current_scene}
+
+规则：
+- 只回复场景名称，不要其他内容
+- 如果画面内容与当前场景匹配，回复"不变"
+- 如果画面更适合其他场景，回复那个场景的名称
+- 根据画面内容判断，不要猜测"""},
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}},
+                    {"type": "text", "text": "当前画面适合什么场景？"}
+                ]}
+            ],
+            max_tokens=20,
+        )
+        result = response.choices[0].message.content.strip()
+
+        # 如果 AI 建议切换（不是"不变"且不是当前场景）
+        if result and result != "不变" and result != current_scene:
+            # 验证是有效场景名
+            matched = next((s for s in scenes if s.get("name") == result), None)
+            if matched and result != _scene_cache["last_scene"]:
+                _scene_cache["last_scene"] = result
+                await ws.send_json({
+                    "type": "scene_detected",
+                    "data": {"scene": matched["id"], "name": result}
+                })
+                print(f"[Scene] AI 建议切换: {result}")
+        else:
+            _scene_cache["last_scene"] = current_scene
+
+    except Exception as e:
+        print(f"场景监控错误: {e}")

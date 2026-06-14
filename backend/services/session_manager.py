@@ -33,10 +33,16 @@ class Session:
             self.conversation_history = self.conversation_history[-(settings.MAX_HISTORY_TURNS * 2):]
 
     def get_messages_for_llm(self, max_turns: int = 10) -> List[Dict[str, str]]:
-        """获取发送给 LLM 的消息列表"""
+        """获取发送给 LLM 的消息列表（注入记忆上下文）"""
         from ..config import settings
+        from ..services.memory_service import get_memory_context
 
-        messages = [{"role": "system", "content": settings.SYSTEM_PROMPT}]
+        system_content = settings.SYSTEM_PROMPT
+        memory_ctx = get_memory_context()
+        if memory_ctx:
+            system_content += f"\n\n---\n以下是用户的记忆和待办信息，请在回答时参考:\n{memory_ctx}"
+
+        messages = [{"role": "system", "content": system_content}]
 
         # 添加历史对话
         recent_history = self.conversation_history[-(max_turns * 2):]

@@ -33,6 +33,10 @@
   --warm: #E8A860;
   --warm-soft: rgba(232, 168, 96, 0.1);
 
+  /* 辅助色 */
+  --cool: #D4836A;
+  --cool-soft: rgba(212, 131, 106, 0.1);
+
   /* 表面 */
   --surface: rgba(255, 252, 247, 0.85);
   --surface-hover: rgba(255, 252, 247, 0.95);
@@ -87,6 +91,9 @@
   --warm: #666666;
   --warm-soft: rgba(102, 102, 102, 0.1);
 
+  --cool: #888888;
+  --cool-soft: rgba(136, 136, 136, 0.1);
+
   --surface: rgba(245, 245, 245, 0.85);
   --surface-hover: rgba(245, 245, 245, 0.95);
 
@@ -120,40 +127,43 @@
   --canvas: #0F1117;
   --canvas-deep: #080A0F;
 
-  --orb-1: rgba(123, 154, 255, 0.08);
-  --orb-2: rgba(100, 200, 255, 0.06);
-  --orb-3: rgba(180, 100, 255, 0.05);
-  --orb-glow: rgba(123, 154, 255, 0.2);
+  --orb-1: rgba(220, 50, 50, 0.1);
+  --orb-2: rgba(255, 120, 100, 0.06);
+  --orb-3: rgba(180, 60, 60, 0.05);
+  --orb-glow: rgba(220, 50, 50, 0.2);
 
   --ink: #F0F0F2;
   --ink-soft: #B8B8C0;
   --ink-muted: #6A6A78;
 
-  --accent: #7B9AFF;
-  --accent-hover: #92ACFF;
-  --accent-soft: rgba(123, 154, 255, 0.15);
+  --accent: #DC3232;
+  --accent-hover: #E84545;
+  --accent-soft: rgba(220, 50, 50, 0.15);
 
-  --warm: #FF9E7B;
-  --warm-soft: rgba(255, 158, 123, 0.1);
+  --warm: #F0E8E0;
+  --warm-soft: rgba(240, 232, 224, 0.1);
+
+  --cool: #B84040;
+  --cool-soft: rgba(184, 64, 64, 0.1);
 
   --surface: rgba(15, 17, 23, 0.85);
   --surface-hover: rgba(15, 17, 23, 0.95);
 
   --border: rgba(240, 240, 242, 0.08);
   --border-interactive: rgba(240, 240, 242, 0.15);
-  --border-focus: rgba(123, 154, 255, 0.5);
+  --border-focus: rgba(220, 50, 50, 0.5);
 
-  --tag-bg: rgba(123, 154, 255, 0.12);
-  --tag-hover: rgba(123, 154, 255, 0.2);
-  --badge-bg: rgba(123, 154, 255, 0.15);
-  --badge-border: rgba(123, 154, 255, 0.3);
+  --tag-bg: rgba(220, 50, 50, 0.12);
+  --tag-hover: rgba(220, 50, 50, 0.2);
+  --badge-bg: rgba(220, 50, 50, 0.15);
+  --badge-border: rgba(220, 50, 50, 0.3);
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
   --shadow-card: 0 8px 20px rgba(0, 0, 0, 0.23), 0 20px 40px rgba(0, 0, 0, 0.12);
   --shadow-card-hover: 0 12px 32px rgba(0, 0, 0, 0.3), 0 24px 48px rgba(0, 0, 0, 0.18);
   --shadow-nav: 0 4px 24px rgba(0, 0, 0, 0.4);
-  --shadow-button: 0 2px 12px rgba(123, 154, 255, 0.3);
-  --shadow-button-hover: 0 4px 20px rgba(123, 154, 255, 0.45);
+  --shadow-button: 0 2px 12px rgba(220, 50, 50, 0.3);
+  --shadow-button-hover: 0 4px 20px rgba(220, 50, 50, 0.45);
 
   --glass-base: rgba(15, 17, 23, 0.6);
   --glass-mid: rgba(15, 17, 23, 0.75);
@@ -184,6 +194,9 @@
 
   --warm: #7BC08A;
   --warm-soft: rgba(123, 192, 138, 0.1);
+
+  --cool: #3AAFA9;
+  --cool-soft: rgba(58, 175, 169, 0.1);
 
   --surface: rgba(240, 247, 238, 0.85);
   --surface-hover: rgba(240, 247, 238, 0.95);
@@ -234,6 +247,9 @@
   --warm: #6BA0E0;
   --warm-soft: rgba(107, 160, 224, 0.1);
 
+  --cool: #48C9B0;
+  --cool-soft: rgba(72, 201, 176, 0.1);
+
   --surface: rgba(238, 243, 248, 0.85);
   --surface-hover: rgba(238, 243, 248, 0.95);
 
@@ -282,6 +298,9 @@
 
   --warm: #E89AB0;
   --warm-soft: rgba(232, 154, 176, 0.1);
+
+  --cool: #9B8EC4;
+  --cool-soft: rgba(155, 142, 196, 0.1);
 
   --surface: rgba(253, 242, 246, 0.85);
   --surface-hover: rgba(253, 242, 246, 0.95);

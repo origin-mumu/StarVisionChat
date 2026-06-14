@@ -9,6 +9,7 @@ from typing import Optional, Callable, Dict, Any, List
 import websockets
 from openai import AsyncOpenAI
 from ..config import settings
+from ..services.tool_service import tool_service
 
 
 class QwenRealtimeService:
@@ -19,6 +20,9 @@ class QwenRealtimeService:
         self.connected = False
         self._message_handler = None
         self._response_callbacks: Dict[str, Callable] = {}
+        self._transcript_buffer = ""  # 用户语音转录缓冲区
+        self._audio_buffer_active = False  # 音频缓冲区是否活跃（正在接收音频流）
+        self._transcription_event: Optional[asyncio.Event] = None  # 转录完成事件
 
     async def connect(self, on_text_delta: Callable = None, on_audio_delta: Callable = None,
                       on_transcript: Callable = None, on_response_done: Callable = None):
@@ -28,12 +32,28 @@ class QwenRealtimeService:
             return False
 
         try:
+            # 先关闭旧连接和消息处理任务
+            if self._message_handler:
+                self._message_handler.cancel()
+                try:
+                    await self._message_handler
+                except asyncio.CancelledError:
+                    pass
+                self._message_handler = None
+            if self.ws:
+                try:
+                    await self.ws.close()
+                except Exception:
+                    pass
+                self.ws = None
+
             url = f"{settings.QWEN_WS_URL}?model={settings.QWEN_MODEL}"
             headers = {"Authorization": f"Bearer {settings.QWEN_API_KEY}"}
 
             print(f"Qwen Realtime 正在连接: {url}")
             self.ws = await websockets.connect(url, additional_headers=headers)
             self.connected = True
+            self._audio_buffer_active = False  # 重置音频缓冲区状态
 
             self._response_callbacks = {
                 "on_text_delta": on_text_delta,
@@ -54,7 +74,7 @@ class QwenRealtimeService:
             return False
 
     async def _update_session(self):
-        """配置会话参数"""
+        """配置会话参数（Manual 模式：禁用 VAD，客户端控制提交时机）"""
         event = {
             "type": "session.update",
             "session": {
@@ -63,10 +83,9 @@ class QwenRealtimeService:
                 "instructions": settings.SYSTEM_PROMPT,
                 "input_audio_format": "pcm",
                 "output_audio_format": "pcm",
-                "turn_detection": {
-                    "type": "semantic_vad",
-                    "threshold": 0.5,
-                    "silence_duration_ms": 800
+                "turn_detection": None,
+                "input_audio_transcription": {
+                    "model": "qwen3-asr-flash-realtime"
                 }
             }
         }
@@ -81,12 +100,37 @@ class QwenRealtimeService:
 
     async def stream_audio(self, audio_base64: str):
         """流式发送音频数据（PCM16 16kHz）"""
+        self._audio_buffer_active = True
         event = {"type": "input_audio_buffer.append", "audio": audio_base64}
         await self._send_event(event)
 
     async def append_image(self, image_base64: str):
-        """追加图像帧"""
+        """追加图像帧（音频缓冲区活跃时才能发送）"""
+        if not self._audio_buffer_active:
+            return
         event = {"type": "input_image_buffer.append", "image": image_base64}
+        await self._send_event(event)
+
+    async def commit(self):
+        """显式提交音频缓冲区（Manual 模式）"""
+        self._audio_buffer_active = False
+        self._transcription_event = asyncio.Event()
+        event = {"type": "input_audio_buffer.commit"}
+        await self._send_event(event)
+
+    async def wait_transcription(self, timeout: float = 10.0) -> bool:
+        """等待转录完成"""
+        if not self._transcription_event:
+            return False
+        try:
+            await asyncio.wait_for(self._transcription_event.wait(), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
+    async def create_response(self):
+        """请求模型生成回复（Manual 模式）"""
+        event = {"type": "response.create"}
         await self._send_event(event)
 
     async def _handle_messages(self):
@@ -106,15 +150,33 @@ class QwenRealtimeService:
                     if callback:
                         callback(event.get("delta", ""))
 
+                elif event_type == "conversation.item.input_audio_transcription.delta":
+                    # 用户语音转录流式更新
+                    delta = event.get("text", "") or event.get("delta", "")
+                    self._transcript_buffer += delta
+                    print(f"[Qwen 转录 delta] {delta} | 累积: {self._transcript_buffer}")
+
                 elif event_type == "conversation.item.input_audio_transcription.completed":
+                    # 用户语音转录完成（使用 completed 的 transcript，如果为空则用 buffer）
+                    transcript = event.get("transcript", "") or self._transcript_buffer
+                    self._transcript_buffer = ""
+                    print(f"[Qwen 转录完成] {transcript}")
                     callback = self._response_callbacks.get("on_transcript")
-                    if callback:
-                        callback(event.get("transcript", ""))
+                    if callback and transcript:
+                        callback(transcript)
+                    # 通知等待转录的协程
+                    if self._transcription_event:
+                        self._transcription_event.set()
 
                 elif event_type == "response.done":
+                    self._audio_buffer_active = False
                     callback = self._response_callbacks.get("on_response_done")
                     if callback:
                         callback(event)
+
+                elif event_type == "input_audio_buffer.committed":
+                    # 服务端确认缓冲区已提交
+                    self._audio_buffer_active = False
 
                 elif event_type == "error":
                     print(f"Qwen Realtime 错误: {event.get('error')}")
@@ -161,7 +223,7 @@ class QwenLLMService:
 
     async def chat(self, messages: List[Dict[str, Any]], image_base64: str = None) -> str:
         """
-        文本对话
+        文本对话（支持 Function Calling）
 
         Args:
             messages: 消息列表
@@ -190,14 +252,41 @@ class QwenLLMService:
                         ]
                         break
 
-            response = await self.client.chat.completions.create(
-                model="qwen-plus",
-                messages=messages,
-                max_tokens=1024,
-                temperature=0.7
-            )
+            tools = tool_service.get_definitions()
 
-            return response.choices[0].message.content
+            # Function Calling 循环（最多 5 轮工具调用）
+            for _ in range(5):
+                response = await self.client.chat.completions.create(
+                    model="qwen-plus",
+                    messages=messages,
+                    tools=tools,
+                    max_tokens=1024,
+                    temperature=0.7
+                )
+
+                msg = response.choices[0].message
+
+                # 如果没有工具调用，直接返回文本
+                if not msg.tool_calls:
+                    return msg.content
+
+                # 执行工具调用
+                messages.append(msg.model_dump())
+                for tc in msg.tool_calls:
+                    func_name = tc.function.name
+                    try:
+                        args = json.loads(tc.function.arguments)
+                    except json.JSONDecodeError:
+                        args = {}
+                    result = await tool_service.execute(func_name, args)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": str(result)
+                    })
+                    print(f"[Qwen Tool] {func_name}({args}) => {str(result)[:100]}")
+
+            return msg.content or "（工具调用轮次超限）"
 
         except Exception as e:
             print(f"Qwen LLM 错误: {e}")

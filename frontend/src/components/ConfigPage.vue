@@ -1,13 +1,15 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { wsService } from '../services/wsService'
 import {
   View,
   Hide,
   Check,
+  ArrowLeft,
 } from '@element-plus/icons-vue'
 
-const emit = defineEmits(['done'])
+const router = useRouter()
 
 const isVisible = ref(false)
 const showApiKey = ref(false)
@@ -147,13 +149,20 @@ function saveAndEnter() {
   // Transition out
   setTimeout(() => {
     isVisible.value = false
-    setTimeout(() => emit('done'), 400)
+    setTimeout(() => router.push('/chat'), 400)
   }, 300)
 }
 
 function skipConfig() {
   isVisible.value = false
-  setTimeout(() => emit('done'), 400)
+  setTimeout(() => router.push('/chat'), 400)
+}
+
+function goBack() {
+  isVisible.value = false
+  setTimeout(() => {
+    router.replace('/')
+  }, 400)
 }
 </script>
 
@@ -161,6 +170,9 @@ function skipConfig() {
   <div class="config-page" :class="{ visible: isVisible }">
     <div class="config-card">
       <div class="config-header">
+        <button class="back-btn" @click="goBack" title="返回封面">
+          <el-icon><ArrowLeft /></el-icon>
+        </button>
         <h2>系统配置</h2>
         <p>选择模型并配置 API 参数</p>
       </div>
@@ -339,6 +351,7 @@ function skipConfig() {
 }
 
 .config-card {
+  position: relative;
   width: 100%;
   max-width: 520px;
   max-height: 90vh;
@@ -374,6 +387,29 @@ function skipConfig() {
   font-size: 14px;
   color: var(--ink-muted);
   margin: 0;
+}
+
+.back-btn {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.back-btn:hover {
+  background: var(--surface-hover);
+  color: var(--accent);
+  border-color: var(--border-interactive);
 }
 
 .config-form {

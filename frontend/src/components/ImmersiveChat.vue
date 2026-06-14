@@ -13,11 +13,13 @@ import hljs from "highlight.js";
 import { useTTS } from "../composables/useTTS";
 import { useChatStore } from "../stores/chatStore";
 import { useSessionStore } from "../stores/sessionStore";
+import { useSceneStore } from "../stores/sceneStore";
 import { wsService } from "../services/wsService";
 import { useCamera } from "../composables/useCamera";
 import { useMicrophone } from "../composables/useMicrophone";
 import { useThemeStore } from "../stores/themeStore";
 import SettingsPanel from "./SettingsPanel.vue";
+import MemoryPanel from "./MemoryPanel.vue";
 import { storeToRefs } from "pinia";
 import {
   ChatDotRound,
@@ -32,7 +34,16 @@ import {
   Plus,
   Delete,
   Close,
+  Notebook,
+  Search,
+  FullScreen,
+  ArrowLeft,
+  ArrowRight,
 } from "@element-plus/icons-vue";
+
+import { useRouter } from "vue-router";
+
+const router = useRouter();
 
 const themeStore = useThemeStore();
 const { currentTheme, themes } = storeToRefs(themeStore);
@@ -40,57 +51,49 @@ const { setTheme } = themeStore;
 
 const chatStore = useChatStore();
 const sessionStore = useSessionStore();
+const sceneStore = useSceneStore();
 const showSessionList = ref(false);
+const showSceneMenu = ref(false);
+const showMemoryPanel = ref(false);
+const videoMain = ref(false); // false=AI主界面, true=视频主界面
+const chatCollapsed = ref(false); // 侧边栏折叠
+const memoryNotification = ref("");
+const sceneSuggestion = ref(null); // { sceneName }
+let sceneMonitorTimer = null;
+const SCENE_MONITOR_INTERVAL = 8000; // 8秒检测一次
+
+// 自定义场景
+const showAddScene = ref(false);
+const newSceneName = ref("");
+const newScenePrompt = ref("");
 
 /* ─── Model provider ─── */
-const modelProvider = ref('mimo')  // mimo / qwen
-let qwenImageInterval = null  // Qwen 模式下的图像发送定时器
+const modelProvider = ref("mimo"); // mimo / qwen
+let qwenAudioSent = false; // Qwen 模式下是否已发送过音频（Qwen 要求先发音频才能发图像）
 
 // Load model provider from config
 function loadModelProvider() {
-  const saved = localStorage.getItem('starvisionchat_config')
+  const saved = localStorage.getItem("starvisionchat_config");
   if (saved) {
     try {
-      const config = JSON.parse(saved)
-      const newProvider = config.modelProvider || 'mimo'
-      if (newProvider !== modelProvider.value) {
-        modelProvider.value = newProvider
-        // 切换模型时更新图像流
-        updateQwenImageStream()
-      }
-    } catch { /* ignore */ }
-  }
-}
-
-// Qwen 模式下持续发送图像帧（每秒 1 帧）
-function updateQwenImageStream() {
-  // 清除现有定时器
-  if (qwenImageInterval) {
-    clearInterval(qwenImageInterval)
-    qwenImageInterval = null
-  }
-
-  // 如果是 Qwen 模式且摄像头开启，开始发送图像
-  if (modelProvider.value === 'qwen' && isCameraOn.value) {
-    qwenImageInterval = setInterval(() => {
-      const frame = captureFrame()
-      if (frame) {
-        wsService.send('image_stream', { image: frame })
-      }
-    }, 1000)  // 每秒 1 帧
+      const config = JSON.parse(saved);
+      modelProvider.value = config.modelProvider || "mimo";
+    } catch {
+      /* ignore */
+    }
   }
 }
 
 onMounted(() => {
-  loadModelProvider()
+  loadModelProvider();
 
   // 监听配置更新事件（从设置面板触发）
-  window.addEventListener('config-updated', loadModelProvider)
-})
+  window.addEventListener("config-updated", loadModelProvider);
+});
 
 onBeforeUnmount(() => {
-  window.removeEventListener('config-updated', loadModelProvider)
-})
+  window.removeEventListener("config-updated", loadModelProvider);
+});
 
 const {
   ttsEnabled,
@@ -124,17 +127,12 @@ const cameraLoading = ref(false);
 async function toggleCamera() {
   if (isCameraOn.value) {
     stopCameraFn();
-    // 停止 Qwen 图像流
-    if (qwenImageInterval) {
-      clearInterval(qwenImageInterval)
-      qwenImageInterval = null
-    }
+    stopSceneMonitor();
   } else {
     cameraLoading.value = true;
     await initCamera();
     cameraLoading.value = false;
-    // 启动 Qwen 图像流（如果是 Qwen 模式）
-    updateQwenImageStream()
+    startSceneMonitor();
   }
 }
 
@@ -206,6 +204,8 @@ let audioChunks = [];
 let silenceTimer = null;
 let audioCtx = null;
 let analyser = null;
+let qwenProcessor = null; // Qwen 模式 ScriptProcessorNode
+let qwenMicStream = null; // Qwen 模式麦克风 MediaStream
 let recordingMimeType = "audio/webm";
 let abortCtrl = null;
 
@@ -222,12 +222,14 @@ async function toggleVoice() {
   if (!speechSupported.value) return;
 
   // 重新加载模型配置（可能在设置面板中被修改）
-  const saved = localStorage.getItem('starvisionchat_config')
+  const saved = localStorage.getItem("starvisionchat_config");
   if (saved) {
     try {
-      const config = JSON.parse(saved)
-      modelProvider.value = config.modelProvider || 'mimo'
-    } catch { /* ignore */ }
+      const config = JSON.parse(saved);
+      modelProvider.value = config.modelProvider || "mimo";
+    } catch {
+      /* ignore */
+    }
   }
 
   if (currentMode.value !== "listening") {
@@ -243,72 +245,115 @@ async function startRecording() {
   audioChunks = [];
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    audioCtx = new AudioContext();
-    const source = audioCtx.createMediaStreamSource(stream);
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 256;
-    analyser.smoothingTimeConstant = 0.3;
-    source.connect(analyser);
 
-    recordingMimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-      ? "audio/webm;codecs=opus"
-      : "audio/webm";
-
-    mediaRecorder = new MediaRecorder(stream, { mimeType: recordingMimeType });
-    audioChunks = [];
-
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) audioChunks.push(e.data);
-    };
-
-    mediaRecorder.onstop = async () => {
-      stream.getTracks().forEach((t) => t.stop());
-      if (audioCtx) {
-        audioCtx.close();
-        audioCtx = null;
-      }
-      if (silenceTimer) {
-        clearTimeout(silenceTimer);
-        silenceTimer = null;
-      }
-      analyser = null;
-
-      if (audioChunks.length === 0) {
-        setMode("idle");
-        return;
-      }
-      const audioBlob = new Blob(audioChunks, { type: recordingMimeType });
-
-      // 根据模型选择使用不同的发送方式
-      if (modelProvider.value === 'qwen') {
-        // Qwen 模式：流式发送音频
-        await streamAudioToQwen(audioBlob);
-      } else {
-        // MiMo 模式：录音结束后一次性发送
-        await sendVoiceAudio(audioBlob);
-      }
-    };
-
-    mediaRecorder.onerror = () => {
-      setMode("idle");
-    };
-
-    mediaRecorder.start(100);
-    checkSilence();
+    if (modelProvider.value === "qwen") {
+      // ── Qwen 模式：实时 PCM 流式发送 ──
+      await startQwenRealtimeRecording(stream);
+    } else {
+      // ── MiMo 模式：MediaRecorder 录音结束后一次性发送 ──
+      await startMimoRecording(stream);
+    }
   } catch {
     interimText.value = "麦克风权限被拒绝";
     setMode("idle");
   }
 }
 
+/** Qwen 模式：实时 PCM 流式录制，每 256 样本发送一次音频+图像 */
+async function startQwenRealtimeRecording(stream) {
+  qwenMicStream = stream;
+  audioCtx = new AudioContext({ sampleRate: 16000 });
+  const source = audioCtx.createMediaStreamSource(stream);
+  // bufferSize=256 → 每 16ms 一帧（16000/256），实时性好
+  qwenProcessor = audioCtx.createScriptProcessor(256, 1, 1);
+  source.connect(qwenProcessor);
+  qwenProcessor.connect(audioCtx.destination);
+
+  let lastImgTime = 0;
+  qwenAudioSent = false;
+
+  qwenProcessor.onaudioprocess = (e) => {
+    if (currentMode.value !== "listening") return;
+    const samples = e.inputBuffer.getChannelData(0);
+    // float32 → int16
+    const pcm = new ArrayBuffer(samples.length * 2);
+    const view = new DataView(pcm);
+    for (let i = 0; i < samples.length; i++) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    }
+    wsService.send("audio_stream", { audio: arrayBufToB64(pcm) });
+    qwenAudioSent = true;
+
+    // 每秒发送一帧图像
+    const now = Date.now();
+    if (now - lastImgTime >= 1000) {
+      lastImgTime = now;
+      const frame = captureFrame();
+      if (frame) wsService.send("image_stream", { image: frame });
+    }
+  };
+
+  // 静音检测（复用同一逻辑）
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  analyser.smoothingTimeConstant = 0.3;
+  source.connect(analyser);
+  checkSilence();
+}
+
+/** MiMo 模式：MediaRecorder 录音，结束后一次性发送 */
+async function startMimoRecording(stream) {
+  audioCtx = new AudioContext();
+  const source = audioCtx.createMediaStreamSource(stream);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  analyser.smoothingTimeConstant = 0.3;
+  source.connect(analyser);
+
+  recordingMimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+    ? "audio/webm;codecs=opus"
+    : "audio/webm";
+
+  mediaRecorder = new MediaRecorder(stream, { mimeType: recordingMimeType });
+  audioChunks = [];
+
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size > 0) audioChunks.push(e.data);
+  };
+
+  mediaRecorder.onstop = async () => {
+    stream.getTracks().forEach((t) => t.stop());
+    if (audioCtx) {
+      audioCtx.close();
+      audioCtx = null;
+    }
+    if (silenceTimer) {
+      clearTimeout(silenceTimer);
+      silenceTimer = null;
+    }
+    analyser = null;
+
+    if (audioChunks.length === 0) {
+      setMode("idle");
+      return;
+    }
+    const audioBlob = new Blob(audioChunks, { type: recordingMimeType });
+    await sendVoiceAudio(audioBlob);
+  };
+
+  mediaRecorder.onerror = () => {
+    setMode("idle");
+  };
+  mediaRecorder.start(100);
+  checkSilence();
+}
+
 function checkSilence() {
-  if (
-    !analyser ||
-    currentMode.value !== "listening" ||
-    !mediaRecorder ||
-    mediaRecorder.state !== "recording"
-  )
-    return;
+  // Qwen 模式用 qwenProcessor，MiMo 模式用 mediaRecorder
+  const isRecording =
+    qwenProcessor || (mediaRecorder && mediaRecorder.state === "recording");
+  if (!analyser || currentMode.value !== "listening" || !isRecording) return;
 
   const data = new Uint8Array(analyser.fftSize);
   analyser.getByteTimeDomainData(data);
@@ -336,6 +381,23 @@ function stopRecording() {
   if (silenceTimer) {
     clearTimeout(silenceTimer);
     silenceTimer = null;
+  }
+  if (qwenProcessor) {
+    // Qwen 模式：断开 ScriptProcessorNode
+    qwenProcessor.disconnect();
+    qwenProcessor = null;
+    if (qwenMicStream) {
+      qwenMicStream.getTracks().forEach((t) => t.stop());
+      qwenMicStream = null;
+    }
+    if (audioCtx) {
+      audioCtx.close();
+      audioCtx = null;
+    }
+    analyser = null;
+    // 通知后端：录音结束，提交缓冲区并请求模型响应
+    wsService.send("audio_end_qwen", {});
+    setMode("thinking");
   }
   if (mediaRecorder && mediaRecorder.state !== "inactive") {
     mediaRecorder.stop();
@@ -395,91 +457,124 @@ function arrayBufToB64(buf) {
 /** Send voice audio via WebSocket for STT */
 async function sendVoiceAudio(audioBlob) {
   try {
-    const wav = await convertToWav(audioBlob)
-    const b64 = arrayBufToB64(await wav.arrayBuffer())
+    const wav = await convertToWav(audioBlob);
+    const b64 = arrayBufToB64(await wav.arrayBuffer());
 
     // 捕获当前摄像头帧
-    const frame = captureFrame()
+    const frame = captureFrame();
 
     // Send audio via WebSocket（附带当前帧）
-    setMode('thinking')
-    wsService.sendAudioChunk(b64)
-    wsService.sendAudioEnd(frame)
+    setMode("thinking");
+    wsService.sendAudioChunk(b64);
+    wsService.sendAudioEnd(frame);
   } catch {
-    setMode('idle')
-  }
-}
-
-/** Stream audio in real-time for Qwen mode */
-async function streamAudioToQwen(audioBlob) {
-  try {
-    // 转换为 16kHz PCM 格式（Qwen 要求）
-    const pcm16k = await convertToPcm16k(audioBlob)
-    const b64 = arrayBufToB64(pcm16k)
-
-    // 流式发送音频到 Qwen
-    wsService.send('audio_stream', { audio: b64 })
-
-    // 捕获并发送当前摄像头帧
-    const frame = captureFrame()
-    if (frame) {
-      wsService.send('image_stream', { image: frame })
-    }
-  } catch (e) {
-    console.error('Qwen audio stream error:', e)
-  }
-}
-
-/** 转换音频为 16kHz PCM16 格式（Qwen 要求） */
-async function convertToPcm16k(audioBlob) {
-  const ctx = new AudioContext({ sampleRate: 16000 })
-  try {
-    const buf = await ctx.decodeAudioData(await audioBlob.arrayBuffer())
-    const ch = buf.getChannelData(0) // 单声道
-
-    // PCM16 编码
-    const pcm = new ArrayBuffer(ch.length * 2)
-    const view = new DataView(pcm)
-    for (let i = 0; i < ch.length; i++) {
-      const s = Math.max(-1, Math.min(1, ch[i]))
-      view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
-    }
-    return pcm
-  } finally {
-    ctx.close()
+    setMode("idle");
   }
 }
 
 /* ─── Session Management ─── */
 function createNewSession() {
-  sessionStore.createSession()
-  chatStore.loadSession([])
-  showSessionList.value = false
+  sessionStore.createSession();
+  chatStore.loadSession([]);
+  showSessionList.value = false;
 }
 
 function switchToSession(id) {
-  const messages = sessionStore.switchSession(id)
-  chatStore.loadSession(messages)
-  showSessionList.value = false
+  const messages = sessionStore.switchSession(id);
+  chatStore.loadSession(messages);
+  showSessionList.value = false;
 }
 
 function deleteSession(id) {
-  sessionStore.deleteSession(id)
+  sessionStore.deleteSession(id);
   // 如果删除后当前会话变了，加载新当前会话的消息
   if (sessionStore.currentSessionId !== id) {
-    chatStore.loadSession(sessionStore.currentMessages)
+    chatStore.loadSession(sessionStore.currentMessages);
   }
 }
 
 function formatSessionTime(date) {
-  if (!date) return ''
-  const d = date instanceof Date ? date : new Date(date)
-  const now = new Date()
-  const isToday = d.toDateString() === now.toDateString()
+  if (!date) return "";
+  const d = date instanceof Date ? date : new Date(date);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
   if (isToday) {
-    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    return d.toLocaleTimeString("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   }
-  return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+  return d.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+}
+
+/* ─── Scene Management ─── */
+function switchScene(sceneId) {
+  sceneStore.switchScene(sceneId);
+  showSceneMenu.value = false;
+
+  // 通知后端更新系统提示词
+  wsService.send("scene_update", {
+    system_prompt: sceneStore.systemPrompt,
+  });
+}
+
+function handleAddScene() {
+  if (!newSceneName.value.trim() || !newScenePrompt.value.trim()) return;
+  sceneStore.addCustomScene(
+    newSceneName.value.trim(),
+    newScenePrompt.value.trim(),
+  );
+  newSceneName.value = "";
+  newScenePrompt.value = "";
+  showAddScene.value = false;
+}
+
+function handleRemoveScene(sceneId) {
+  sceneStore.removeCustomScene(sceneId);
+}
+
+// 自动检测场景切换
+function checkAutoSwitch(text) {
+  const suggestedScene = sceneStore.detectScene(text);
+  if (suggestedScene) {
+    switchScene(suggestedScene);
+  }
+}
+
+/* ─── Scene Monitor（定时截帧检测场景变化） ─── */
+function startSceneMonitor() {
+  stopSceneMonitor();
+  sceneMonitorTimer = setInterval(() => {
+    if (!isCameraOn.value || currentMode.value === "speaking") return;
+    const frame = captureFrame();
+    if (frame) {
+      wsService.send("scene_monitor", {
+        image: frame,
+        scenes: sceneStore.scenes.map((s) => ({ id: s.id, name: s.name })),
+        current_scene: sceneStore.currentScene.name,
+      });
+    }
+  }, SCENE_MONITOR_INTERVAL);
+}
+
+function stopSceneMonitor() {
+  if (sceneMonitorTimer) {
+    clearInterval(sceneMonitorTimer);
+    sceneMonitorTimer = null;
+  }
+}
+
+function handleSceneDetected(data) {
+  const sceneId = data.scene;
+  const sceneName = data.name || "";
+  if (!sceneId || sceneId === sceneStore.currentSceneId) return;
+  // 自动切换
+  switchScene(sceneId);
+  // 显示切换通知（3秒后消失）
+  sceneSuggestion.value = { sceneName };
+  setTimeout(() => {
+    sceneSuggestion.value = null;
+  }, 3000);
 }
 
 /* ─── AI Response Handling ─── */
@@ -493,6 +588,9 @@ function handleAIResponse(data) {
   if (isUser) {
     // Voice input transcribed text — add as user message
     if (text) {
+      // 自动检测场景切换
+      checkAutoSwitch(text);
+
       chatStore.addMessage(text, true);
       scrollChat();
     }
@@ -555,11 +653,19 @@ function handleAIAudio(data) {
 let qwenAudioContext = null;
 let qwenAudioQueue = [];
 let qwenIsPlaying = false;
+let qwenTextBuffer = ""; // 缓冲 AI 文本，等用户转录显示后再显示
+let qwenTranscriptReceived = false; // 是否已收到用户转录
 
 function handleQwenTextDelta(data) {
   // 流式追加文本到当前 AI 回复
   const text = data.text || "";
   if (!text) return;
+
+  // 如果用户转录还没显示，先缓冲
+  if (!qwenTranscriptReceived) {
+    qwenTextBuffer += text;
+    return;
+  }
 
   // 找到最后一条 AI 消息并追加
   const messages = chatStore.messages;
@@ -569,6 +675,20 @@ function handleQwenTextDelta(data) {
   } else {
     chatStore.addMessage(text, false);
   }
+}
+
+// 刷新缓冲的 AI 文本
+function flushQwenTextBuffer() {
+  if (!qwenTextBuffer) return;
+
+  const messages = chatStore.messages;
+  const lastMsg = messages[messages.length - 1];
+  if (lastMsg && !lastMsg.isUser) {
+    lastMsg.text += qwenTextBuffer;
+  } else {
+    chatStore.addMessage(qwenTextBuffer, false);
+  }
+  qwenTextBuffer = "";
 }
 
 function handleQwenAudioDelta(data) {
@@ -610,7 +730,9 @@ function playQwenAudioQueue() {
   setMode("speaking");
 
   if (!qwenAudioContext) {
-    qwenAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+    qwenAudioContext = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: 24000,
+    });
   }
 
   const float32 = qwenAudioQueue.shift();
@@ -624,19 +746,51 @@ function playQwenAudioQueue() {
   source.start();
 }
 
+let qwenTurnInputLen = 0; // 本轮用户输入字符数
+
 function handleQwenTranscript(data) {
   // 用户语音转录完成
   const text = data.text || "";
   if (text) {
+    // 自动检测场景切换
+    checkAutoSwitch(text);
+
+    // 标记已收到用户转录
+    qwenTranscriptReceived = true;
+
+    // 先显示用户消息
     chatStore.addMessage(text, true);
     scrollChat();
+
+    // 记录输入长度用于 token 估算
+    qwenTurnInputLen = text.length;
+
+    // 然后刷新缓冲的 AI 文本
+    flushQwenTextBuffer();
   }
 }
 
 function handleQwenResponseDone() {
-  // Qwen 响应完成
+  // Qwen 响应完成 — 估算 token 用量
+  const outputLen = qwenTextBuffer.length;
+  const estimatedTokens = Math.ceil((qwenTurnInputLen + outputLen) * 1.5);
+  chatStore.updateCost({
+    stt_calls: chatStore.costData.stt_calls + 1,
+    llm_tokens: chatStore.costData.llm_tokens + estimatedTokens,
+  });
+  qwenTurnInputLen = 0;
   qwenIsPlaying = false;
+  qwenTranscriptReceived = false;
+  qwenTextBuffer = "";
   setMode("idle");
+}
+
+function handleMemorySaved(data) {
+  // 记忆保存通知
+  memoryNotification.value = data.message || "已保存到记忆";
+  setTimeout(() => {
+    memoryNotification.value = "";
+  }, 3000);
 }
 
 function typewriterEffect(text) {
@@ -704,11 +858,14 @@ function handleTextSend() {
   const text = inputText.value.trim();
   if (!text || isLocalSending.value) return;
 
+  // 自动检测场景切换
+  checkAutoSwitch(text);
+
   chatStore.addMessage(text, true);
 
   // 捕获当前摄像头帧，和消息一起发送
-  const frame = captureFrame()
-  wsService.sendTextInput(text, frame)
+  const frame = captureFrame();
+  wsService.sendTextInput(text, frame);
 
   inputText.value = "";
   isLocalSending.value = true;
@@ -725,6 +882,19 @@ function onInputKeydown(e) {
 function useQuickReply(text) {
   if (isLocalSending.value) return;
   inputText.value = text;
+}
+
+function takeSnapshot() {
+  if (!isCameraOn.value) return;
+  const frame = captureFrame();
+  if (!frame) return;
+  // 发送截图分析请求
+  wsService.send("text_input", {
+    text: "请详细描述你看到的画面内容",
+    image: frame,
+  });
+  chatStore.addMessage("请详细描述你看到的画面内容", true);
+  setMode("thinking");
 }
 
 function scrollChat() {
@@ -779,7 +949,7 @@ function fmt(s) {
 /* ═══════════════════════════════════════════
    3D Particle Sphere + Background Stars
    ═══════════════════════════════════════════ */
-const SPHERE_RADIUS = 180;
+let SPHERE_RADIUS = 180;
 const PARTICLE_COUNT = 800;
 const BG_STAR_COUNT = 250;
 
@@ -819,15 +989,27 @@ function getParticleColors() {
   const dark = isDarkTheme();
   const accent = getThemeColor("--accent", "#E85D2A");
   const warm = getThemeColor("--warm", "#E8A860");
+  const cool = getThemeColor("--cool", "#5CADCA");
   return {
-    signal: accent,
-    core: warm,
-    void: dark ? "rgba(255,255,255,0.15)" : `${warm}33`,
+    accent,
+    warm,
+    cool,
+    void: dark ? "rgba(255,255,255,0.12)" : `${cool}30`,
     star: dark ? "rgba(255,255,255,0.5)" : `${accent}88`,
+    // 每种模式用不同主色调，拉开层次
     idle: accent,
     listening: accent,
     thinking: warm,
-    speaking: dark ? "rgba(255,255,255,0.8)" : accent,
+    speaking: cool,
+  };
+}
+
+function hexToRGB(hex) {
+  const h = hex.replace("#", "");
+  return {
+    r: parseInt(h.substring(0, 2), 16),
+    g: parseInt(h.substring(2, 4), 16),
+    b: parseInt(h.substring(4, 6), 16),
   };
 }
 
@@ -846,6 +1028,17 @@ const themeObserver = new MutationObserver(() => {
   modeColorMap.listening = themeColors.listening;
   modeColorMap.thinking = themeColors.thinking;
   modeColorMap.speaking = themeColors.speaking;
+  // 给已有粒子重新分配新主题的三色
+  if (orbParticles) {
+    const palette = [themeColors.accent, themeColors.warm, themeColors.cool];
+    orbParticles.forEach((p) => {
+      if (p.type === "theme") {
+        p.color = palette[Math.floor(Math.random() * 3)];
+      } else {
+        p.color = themeColors.void;
+      }
+    });
+  }
 });
 
 let bgStars = [];
@@ -860,16 +1053,16 @@ class OrbP {
     this.bx = r * Math.sin(ph) * Math.cos(th);
     this.by = r * Math.sin(ph) * Math.sin(th);
     this.bz = r * Math.cos(ph);
+    // 20% 半透明点缀 + 80% 从主题三色中随机分配
     const rnd = Math.random();
-    if (rnd < 0.4) {
-      this.type = "signal";
-      this.color = themeColors.signal;
-    } else if (rnd < 0.8) {
-      this.type = "core";
-      this.color = themeColors.core;
-    } else {
+    if (rnd < 0.2) {
       this.type = "void";
       this.color = themeColors.void;
+    } else {
+      this.type = "theme";
+      // 每个粒子固定一种主题色，三种色均匀分布
+      const palette = [themeColors.accent, themeColors.warm, themeColors.cool];
+      this.color = palette[Math.floor(Math.random() * 3)];
     }
     this.size = Math.random() * 1.5 + 0.5;
     this.x = 0;
@@ -878,7 +1071,6 @@ class OrbP {
   }
 
   update(time, rx, ry, mode) {
-    if (this.type === "signal") this.color = modeColorMap[mode] || "#ff4d4d";
     const wave =
       Math.sin(time * 0.002 + (this.bx + this.by + this.bz) * 0.01) *
       (15 + audioLevel * 50);
@@ -983,10 +1175,13 @@ function renderWave(time) {
     const orbSize = 55 + Math.sin(time * 0.003) * 4;
     ctx.globalCompositeOperation = "screen";
     ctx.rotate(time * 0.001);
+    const accentRGB = hexToRGB(themeColors.accent);
+    const warmRGB = hexToRGB(themeColors.warm);
+    const coolRGB = hexToRGB(themeColors.cool);
     const colors = [
-      { r: 255, g: 128, b: 181, radius: orbSize * 1.3, offset: 0, dist: 12 },
-      { r: 129, g: 230, b: 217, radius: orbSize * 1.2, offset: 2.1, dist: 18 },
-      { r: 167, g: 139, b: 250, radius: orbSize * 1.4, offset: 4.2, dist: 10 },
+      { ...accentRGB, radius: orbSize * 1.3, offset: 0, dist: 12 },
+      { ...coolRGB, radius: orbSize * 1.2, offset: 2.1, dist: 18 },
+      { ...warmRGB, radius: orbSize * 1.4, offset: 4.2, dist: 10 },
     ];
     colors.forEach((item, idx) => {
       ctx.save();
@@ -1020,9 +1215,9 @@ function renderWave(time) {
     ctx.globalAlpha = waveAlpha;
     ctx.globalCompositeOperation = "screen";
     const grad = ctx.createLinearGradient(0, 0, w, 0);
-    grad.addColorStop(0.1, "#ff80b5");
-    grad.addColorStop(0.5, "#a78bfa");
-    grad.addColorStop(0.9, "#81e6d9");
+    grad.addColorStop(0.1, themeColors.accent);
+    grad.addColorStop(0.5, themeColors.warm);
+    grad.addColorStop(0.9, themeColors.cool);
     const sx = cx - curWaveW / 2,
       ex = cx + curWaveW / 2;
     waveLayers.forEach((layer) => {
@@ -1061,6 +1256,8 @@ function renderWave(time) {
 function resizeMain() {
   const c = mainCanvasRef.value;
   if (!c) return;
+  // 小窗模式下不自动调整尺寸
+  if (videoMain.value) return;
   width = window.innerWidth;
   height = window.innerHeight;
   c.width = width;
@@ -1158,7 +1355,7 @@ function onUp() {
 /* ─── Lifecycle ─── */
 onMounted(() => {
   // 加载当前会话的消息
-  chatStore.loadSession(sessionStore.currentMessages)
+  chatStore.loadSession(sessionStore.currentMessages);
 
   orbParticles = Array.from({ length: PARTICLE_COUNT }, () => new OrbP());
   resizeMain();
@@ -1170,10 +1367,9 @@ onMounted(() => {
 
   // 自动开启摄像头（让用户可以立即与 AI 视觉交互）
   setTimeout(async () => {
-    await initCamera()
-    // 启动 Qwen 图像流（如果是 Qwen 模式）
-    updateQwenImageStream()
-  }, 500)
+    await initCamera();
+    startSceneMonitor();
+  }, 500);
 
   // Listen for theme changes
   themeObserver.observe(document.documentElement, {
@@ -1191,6 +1387,8 @@ onMounted(() => {
   wsService.on("qwen_audio_delta", handleQwenAudioDelta);
   wsService.on("qwen_transcript", handleQwenTranscript);
   wsService.on("qwen_response_done", handleQwenResponseDone);
+  wsService.on("memory_saved", handleMemorySaved);
+  wsService.on("scene_detected", handleSceneDetected);
 });
 
 onBeforeUnmount(() => {
@@ -1217,6 +1415,9 @@ onBeforeUnmount(() => {
   wsService.off("qwen_text_delta", handleQwenTextDelta);
   wsService.off("qwen_audio_delta", handleQwenAudioDelta);
   wsService.off("qwen_transcript", handleQwenTranscript);
+  wsService.off("memory_saved", handleMemorySaved);
+  wsService.off("scene_detected", handleSceneDetected);
+  stopSceneMonitor();
   wsService.off("qwen_response_done", handleQwenResponseDone);
 
   // Qwen audio cleanup
@@ -1224,18 +1425,36 @@ onBeforeUnmount(() => {
     qwenAudioContext.close();
     qwenAudioContext = null;
   }
-
-  // Qwen image stream cleanup
-  if (qwenImageInterval) {
-    clearInterval(qwenImageInterval)
-    qwenImageInterval = null
-  }
 });
 
 watch(
   () => chatStore.messages.length,
   () => scrollChat(),
 );
+
+// 切换主/小窗时重置 canvas 尺寸、球半径、重建粒子
+watch(videoMain, (isMain) => {
+  nextTick(() => {
+    const c = mainCanvasRef.value
+    if (!c) return
+    if (isMain) {
+      c.width = 200
+      c.height = 150
+      width = 200
+      height = 150
+      SPHERE_RADIUS = 60
+    } else {
+      width = window.innerWidth
+      height = window.innerHeight
+      c.width = width
+      c.height = height
+      SPHERE_RADIUS = 180
+    }
+    // 重建粒子以适配新半径
+    const palette = [themeColors.accent, themeColors.warm, themeColors.cool]
+    orbParticles = Array.from({ length: PARTICLE_COUNT }, () => new OrbP())
+  })
+});
 </script>
 
 <template>
@@ -1246,10 +1465,26 @@ watch(
       :style="{ backgroundColor: modeColorMap[currentMode] || '#ef4444' }"
     ></div>
 
+    <!-- Memory notification -->
+    <transition name="fade">
+      <div v-if="memoryNotification" class="memory-toast">
+        <el-icon><Notebook /></el-icon>
+        <span>{{ memoryNotification }}</span>
+      </div>
+    </transition>
+
+    <!-- Scene auto-switch notification -->
+    <transition name="fade">
+      <div v-if="sceneSuggestion" class="scene-toast">
+        <el-icon><VideoCamera /></el-icon>
+        <span>已切换到{{ sceneSuggestion.sceneName }}</span>
+      </div>
+    </transition>
+
     <!-- Main particle canvas -->
     <canvas
       ref="mainCanvasRef"
-      class="main-canvas"
+      :class="videoMain ? 'mini-canvas' : 'main-canvas'"
       @mousedown="onDown"
       @mousemove="onMove"
       @mouseup="onUp"
@@ -1258,6 +1493,10 @@ watch(
       @touchmove.prevent="onMove"
       @touchend="onUp"
     ></canvas>
+    <!-- AI canvas expand button (shown when video is main) -->
+    <div v-if="videoMain" class="ai-mini-badge" @click="videoMain = false" title="切换到 AI 主界面">
+      <el-icon><Star /></el-icon>
+    </div>
 
     <!-- Top bar: brand + theme dots + settings -->
     <div class="top-bar">
@@ -1265,10 +1504,88 @@ watch(
         <el-icon :size="18" color="var(--accent)"><Star /></el-icon>
         <span class="top-brand-name">StarVision</span>
         <span class="model-badge" :class="modelProvider">
-          {{ modelProvider === 'qwen' ? 'Qwen' : 'MiMo' }}
+          {{ modelProvider === "qwen" ? "Qwen" : "MiMo" }}
         </span>
+
+        <!-- Scene indicator -->
+        <div class="scene-indicator" @click="showSceneMenu = !showSceneMenu">
+          <span
+            class="scene-dot"
+            :style="{ backgroundColor: sceneStore.currentScene.color }"
+          ></span>
+          <span class="scene-name">{{ sceneStore.currentScene.name }}</span>
+        </div>
       </div>
       <div class="top-actions">
+        <!-- Scene menu -->
+        <Transition name="ui-fade">
+          <div v-if="showSceneMenu" class="scene-menu glass-mid">
+            <div class="scene-menu-header">
+              <span>场景模式</span>
+              <label class="auto-switch-toggle">
+                <input
+                  type="checkbox"
+                  v-model="sceneStore.isAutoSwitchEnabled"
+                />
+                <span>自动切换</span>
+              </label>
+            </div>
+            <div class="scene-list">
+              <div
+                v-for="scene in sceneStore.scenes"
+                :key="scene.id"
+                class="scene-item"
+                :class="{ active: scene.id === sceneStore.currentSceneId }"
+                @click="switchScene(scene.id)"
+              >
+                <span
+                  class="scene-item-dot"
+                  :style="{ backgroundColor: scene.color }"
+                ></span>
+                <div class="scene-item-info">
+                  <div class="scene-item-name">{{ scene.name }}</div>
+                  <div class="scene-item-desc">{{ scene.description }}</div>
+                </div>
+                <el-icon
+                  v-if="scene.isCustom"
+                  class="scene-delete-btn"
+                  @click.stop="handleRemoveScene(scene.id)"
+                >
+                  <Delete />
+                </el-icon>
+              </div>
+              <!-- 添加场景 -->
+              <div class="scene-item add-scene" @click="showAddScene = true">
+                <el-icon><Plus /></el-icon>
+                <span>添加场景</span>
+              </div>
+            </div>
+
+            <!-- 添加场景对话框 -->
+            <div v-if="showAddScene" class="add-scene-dialog">
+              <input
+                v-model="newSceneName"
+                placeholder="场景名称（如：做饭助手）"
+                class="add-scene-input"
+              />
+              <textarea
+                v-model="newScenePrompt"
+                placeholder="系统提示词（如：你是一位做菜助手...）"
+                class="add-scene-textarea"
+                rows="3"
+              ></textarea>
+              <div class="add-scene-actions">
+                <button class="add-scene-cancel" @click="showAddScene = false">
+                  取消
+                </button>
+                <button class="add-scene-confirm" @click="handleAddScene">
+                  添加
+                </button>
+              </div>
+            </div>
+          </div>
+        </Transition>
+
         <!-- Theme dots -->
         <div class="theme-dots">
           <span
@@ -1283,26 +1600,48 @@ watch(
         </div>
         <!-- Settings -->
         <SettingsPanel />
+        <!-- Back to Config -->
+        <button class="top-back-btn" @click="router.push('/config')" title="返回配置">
+          <el-icon><ArrowLeft /></el-icon>
+        </button>
+        <!-- Chat panel toggle -->
+        <button class="top-toggle-btn" @click="chatCollapsed = !chatCollapsed" :title="chatCollapsed ? '展开对话' : '收起对话'">
+          <span v-if="chatCollapsed">&laquo;</span>
+          <span v-else>&raquo;</span>
+        </button>
       </div>
     </div>
 
-    <!-- Video stream overlay (bottom-left) -->
-    <div class="video-mini-overlay">
-      <div class="video-mini-wrapper">
+    <!-- Memory Panel -->
+    <div
+      v-if="showMemoryPanel"
+      class="memory-panel-wrapper"
+      @click.self="showMemoryPanel = false"
+    >
+      <MemoryPanel @close="showMemoryPanel = false" />
+    </div>
+
+    <!-- Video stream overlay -->
+    <div :class="videoMain ? 'video-main-overlay' : 'video-mini-overlay'">
+      <div :class="videoMain ? 'video-main-wrapper' : 'video-mini-wrapper'">
         <video
           ref="videoRef"
           autoplay
           muted
           playsinline
-          class="video-mini-element"
+          :class="videoMain ? 'video-main-element' : 'video-mini-element'"
         />
         <div v-if="!isCameraOn" class="video-mini-placeholder">
-          <el-icon :size="24"><VideoCamera /></el-icon>
+          <el-icon :size="videoMain ? 48 : 24"><VideoCamera /></el-icon>
         </div>
         <!-- Speaking indicator -->
         <div v-if="isMicSpeaking" class="video-mini-speaking">
           <div class="pulse-ring"></div>
         </div>
+        <!-- Switch to mini button (shown when video is main) -->
+        <button v-if="videoMain" class="video-switch-btn" @click="videoMain = false" title="切换到 AI 主界面">
+          <el-icon><Star /></el-icon>
+        </button>
       </div>
       <div class="video-mini-controls">
         <button
@@ -1323,6 +1662,22 @@ watch(
         >
           <el-icon v-if="isMicRecording"><Mute /></el-icon>
           <el-icon v-else><Microphone /></el-icon>
+        </button>
+        <button
+          class="mini-ctrl-btn"
+          @click="takeSnapshot"
+          title="画面分析"
+          :disabled="!isCameraOn"
+        >
+          <el-icon><Search /></el-icon>
+        </button>
+        <button
+          v-if="!videoMain"
+          class="mini-ctrl-btn"
+          @click="videoMain = true"
+          title="视频为主界面"
+        >
+          <el-icon><FullScreen /></el-icon>
         </button>
       </div>
     </div>
@@ -1345,7 +1700,11 @@ watch(
 
     <!-- Session list sidebar -->
     <Transition name="session-slide">
-      <div v-if="showSessionList" class="session-sidebar" @click.self="showSessionList = false">
+      <div
+        v-if="showSessionList"
+        class="session-sidebar"
+        @click.self="showSessionList = false"
+      >
         <div class="session-sidebar-inner">
           <div class="session-sidebar-header">
             <span>会话列表</span>
@@ -1363,7 +1722,9 @@ watch(
             >
               <div class="session-item-content">
                 <div class="session-title">{{ session.title }}</div>
-                <div class="session-time">{{ formatSessionTime(session.updatedAt) }}</div>
+                <div class="session-time">
+                  {{ formatSessionTime(session.updatedAt) }}
+                </div>
               </div>
               <button
                 class="session-delete-btn"
@@ -1373,7 +1734,10 @@ watch(
                 <el-icon><Delete /></el-icon>
               </button>
             </div>
-            <div v-if="sessionStore.sessions.length === 0" class="session-empty">
+            <div
+              v-if="sessionStore.sessions.length === 0"
+              class="session-empty"
+            >
               暂无会话
             </div>
           </div>
@@ -1382,7 +1746,7 @@ watch(
     </Transition>
 
     <!-- Chat panel (right side) -->
-    <div class="chat-panel">
+    <div class="chat-panel" :class="{ collapsed: chatCollapsed }">
       <div class="chat-header">
         <button
           class="session-menu-btn"
@@ -1392,7 +1756,19 @@ watch(
           <el-icon><ChatDotRound /></el-icon>
           <span class="session-count">{{ sessionStore.sessions.length }}</span>
         </button>
-        <span>STARVISION CHAT</span>
+        <button
+          class="session-menu-btn"
+          :class="{ active: showMemoryPanel }"
+          @click="showMemoryPanel = !showMemoryPanel"
+          title="AI 记忆"
+        >
+          <el-icon><Notebook /></el-icon>
+        </button>
+        <!-- <span>STARVISION CHAT</span> -->
+        <div class="cost-badge" title="API 调用成本">
+          <span class="cost-label">Tokens</span>
+          <span class="cost-value">{{ chatStore.costData.llm_tokens }}</span>
+        </div>
         <div class="chat-header-actions">
           <button
             class="chat-new-btn"
@@ -1553,6 +1929,86 @@ watch(
   cursor: grabbing;
 }
 
+/* AI canvas as mini view */
+.mini-canvas {
+  display: block;
+  position: absolute;
+  bottom: 40px;
+  left: 24px;
+  width: 200px;
+  height: 150px;
+  z-index: 30;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+  cursor: grab;
+  background: var(--canvas-deep);
+}
+.ai-mini-badge {
+  position: absolute;
+  bottom: 196px;
+  left: 24px;
+  z-index: 31;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--glass-bright);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--accent);
+  box-shadow: var(--shadow-card);
+  transition: all 0.2s;
+}
+.ai-mini-badge:hover {
+  transform: scale(1.1);
+}
+
+/* Video as main view */
+.video-main-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.video-main-wrapper {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: #000;
+}
+.video-main-element {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.video-switch-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.3);
+  background: rgba(0,0,0,0.4);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  backdrop-filter: blur(8px);
+}
+.video-switch-btn:hover {
+  background: rgba(0,0,0,0.6);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* ─── Top Bar ─── */
 .top-bar {
   position: absolute;
@@ -1598,7 +2054,206 @@ watch(
 
 .model-badge.qwen {
   background: rgba(59, 125, 216, 0.15);
-  color: #3B7DD8;
+  color: #3b7dd8;
+}
+
+/* Scene indicator */
+.scene-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-left: 8px;
+}
+
+.scene-indicator:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.scene-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.scene-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* Scene menu */
+.scene-menu {
+  position: absolute;
+  top: calc(100% + 12px);
+  left: 0;
+  width: 280px;
+  padding: 16px;
+  border-radius: 16px;
+  background: var(--glass-mid);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 0.5px solid var(--glass-border);
+  box-shadow: var(--shadow-card);
+  z-index: 100;
+}
+
+.scene-menu-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.auto-switch-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.auto-switch-toggle input {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.scene-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scene-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.scene-item:hover {
+  background: var(--surface-hover);
+}
+
+.scene-item.active {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+}
+
+.scene-item-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.scene-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.scene-item-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.scene-item-desc {
+  font-size: 11px;
+  color: var(--ink-muted);
+  margin-top: 2px;
+}
+.scene-delete-btn {
+  opacity: 0;
+  cursor: pointer;
+  color: var(--ink-muted);
+  transition: opacity 0.2s;
+}
+.scene-item:hover .scene-delete-btn {
+  opacity: 0.6;
+}
+.scene-delete-btn:hover {
+  opacity: 1 !important;
+  color: #e74c3c;
+}
+.add-scene {
+  justify-content: center;
+  gap: 6px;
+  opacity: 0.5;
+  font-size: 12px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 8px;
+}
+.add-scene:hover {
+  opacity: 1;
+  color: var(--accent);
+}
+
+/* Add scene dialog */
+.add-scene-dialog {
+  padding: 8px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.add-scene-input,
+.add-scene-textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--glass-base);
+  color: var(--ink);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  resize: none;
+  box-sizing: border-box;
+}
+.add-scene-input:focus,
+.add-scene-textarea:focus {
+  border-color: var(--accent);
+}
+.add-scene-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.add-scene-cancel,
+.add-scene-confirm {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.add-scene-cancel {
+  background: transparent;
+  color: var(--ink-muted);
+}
+.add-scene-confirm {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 
 .top-actions {
@@ -1669,8 +2324,8 @@ watch(
 }
 
 .video-mini-wrapper {
-  width: 180px;
-  height: 135px;
+  width: 360px;
+  height: 270px;
   border-radius: 16px;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -1843,6 +2498,49 @@ watch(
 }
 
 /* ─── Chat Panel (right side) ─── */
+.top-toggle-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 18px;
+  font-weight: bold;
+  line-height: 1;
+  font-family: inherit;
+}
+.top-toggle-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.top-back-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+}
+.top-back-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .chat-panel {
   position: absolute;
   right: 0;
@@ -1855,6 +2553,7 @@ watch(
   flex-direction: column;
   z-index: 20;
   pointer-events: none;
+  transition: transform 0.3s ease;
   background: linear-gradient(
     to right,
     transparent 0%,
@@ -1875,6 +2574,9 @@ watch(
     black 92%,
     transparent 100%
   );
+}
+.chat-panel.collapsed {
+  transform: translateX(100%);
 }
 
 .chat-header {
@@ -1913,7 +2615,8 @@ watch(
   transition: all 0.2s;
   font-family: inherit;
 }
-.session-menu-btn:hover {
+.session-menu-btn:hover,
+.session-menu-btn.active {
   color: var(--accent);
   border-color: var(--accent);
   background: var(--accent-soft);
@@ -1929,6 +2632,30 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.cost-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--glass-base);
+  border: 1px solid var(--border);
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+.cost-badge:hover {
+  opacity: 1;
+}
+.cost-label {
+  color: var(--ink-muted);
+}
+.cost-value {
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .chat-new-btn {
@@ -1962,7 +2689,7 @@ watch(
   display: flex;
   justify-content: flex-end;
   pointer-events: auto;
-  background: rgba(0,0,0,0.2);
+  background: rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(2px);
 }
 
@@ -1973,7 +2700,7 @@ watch(
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  box-shadow: -4px 0 20px rgba(0,0,0,0.1);
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.1);
 }
 
 .session-slide-enter-active,
@@ -2405,5 +3132,81 @@ watch(
     width: 280px;
     height: 120px;
   }
+}
+
+/* Memory Panel */
+.memory-panel-wrapper {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.15);
+  backdrop-filter: blur(2px);
+}
+
+/* Memory Toast */
+.memory-toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: var(--glass-bright);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 14px;
+  color: var(--accent);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  animation: toast-in 0.3s ease;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+.fade-enter-active {
+  transition: opacity 0.3s;
+}
+.fade-leave-active {
+  transition: opacity 0.5s;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* Scene Toast */
+.scene-toast {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: var(--glass-bright);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  font-size: 13px;
+  color: var(--accent);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  animation: toast-in 0.3s ease;
+  white-space: nowrap;
 }
 </style>
