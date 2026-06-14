@@ -129,8 +129,13 @@ class QwenRealtimeService:
             return False
 
     async def create_response(self):
-        """请求模型生成回复（Manual 模式）"""
-        event = {"type": "response.create"}
+        """请求模型生成回复（Manual 模式），同时返回文字和语音"""
+        event = {
+            "type": "response.create",
+            "response": {
+                "modalities": ["text", "audio"]
+            }
+        }
         await self._send_event(event)
 
     async def _handle_messages(self):
@@ -220,6 +225,29 @@ class QwenLLMService:
             api_key=settings.QWEN_API_KEY,
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
+
+    async def describe_image(self, image_base64: str) -> str:
+        """简短描述图像内容（用于场景检测等）"""
+        if not settings.QWEN_API_KEY:
+            return ""
+        if not image_base64.startswith("data:"):
+            image_base64 = f"data:image/jpeg;base64,{image_base64}"
+        try:
+            resp = await self.client.chat.completions.create(
+                model="qwen-vl-plus",
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": image_base64}},
+                        {"type": "text", "text": "用一句话描述这个画面中有什么物体和场景，10个字以内。"},
+                    ]
+                }],
+                max_tokens=30,
+            )
+            return resp.choices[0].message.content.strip() if resp.choices else ""
+        except Exception as e:
+            print(f"[Qwen describe_image] 错误: {e}")
+            return ""
 
     async def chat(self, messages: List[Dict[str, Any]], image_base64: str = None) -> str:
         """

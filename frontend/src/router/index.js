@@ -2,11 +2,13 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import CoverPage from '../components/CoverPage.vue'
 import ConfigPage from '../components/ConfigPage.vue'
 import ImmersiveChat from '../components/ImmersiveChat.vue'
+import RemoteCamera from '../views/RemoteCamera.vue'
 
 const routes = [
   { path: '/', name: 'cover', component: CoverPage },
   { path: '/config', name: 'config', component: ConfigPage },
   { path: '/chat', name: 'chat', component: ImmersiveChat },
+  { path: '/camera', name: 'camera', component: RemoteCamera },
 ]
 
 const router = createRouter({

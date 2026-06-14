@@ -58,6 +58,22 @@ async def health():
     return {"status": "healthy", "version": settings.APP_VERSION}
 
 
+@app.get("/api/network-info")
+async def network_info():
+    """获取服务器网络信息（用于多端协同二维码）"""
+    import socket
+    hostname = socket.gethostname()
+    try:
+        lan_ip = socket.gethostbyname(hostname)
+    except Exception:
+        lan_ip = "127.0.0.1"
+    return {
+        "hostname": hostname,
+        "lan_ip": lan_ip,
+        "frontend_url": f"https://{lan_ip}:5173",
+    }
+
+
 @app.get("/api/config")
 async def get_config():
     """获取公开配置（不包含敏感信息）"""

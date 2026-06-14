@@ -59,12 +59,15 @@ export function useCamera() {
 
   /**
    * 捕获当前帧，返回 base64（不含 data:image 前缀）
+   * 支持本地摄像头和远程 WebRTC 流
    */
   function captureFrame() {
-    if (!videoRef.value || !isStreaming.value) return null
+    const video = videoRef.value
+    if (!video) return null
+    // video 有画面就能截（本地或远程流均可）
+    if (video.videoWidth === 0 || video.videoHeight === 0) return null
 
     const canvas = document.createElement('canvas')
-    const video = videoRef.value
 
     const maxWidth = 640
     const scale = Math.min(1, maxWidth / video.videoWidth)

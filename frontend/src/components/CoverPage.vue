@@ -133,6 +133,21 @@ function animate(time) {
   animId = requestAnimationFrame(animate)
 }
 
+/* ─── Multi-device QR ─── */
+const lanUrl = ref('')
+const qrVisible = ref(false)
+
+async function fetchLanUrl() {
+  try {
+    const resp = await fetch('/api/network-info')
+    const data = await resp.json()
+    if (data.lan_ip && data.lan_ip !== '127.0.0.1') {
+      lanUrl.value = data.frontend_url
+      qrVisible.value = true
+    }
+  } catch { /* LAN info unavailable, hide QR */ }
+}
+
 function handleEnter() {
   isVisible.value = false
   const saved = localStorage.getItem('starvisionchat_config')
@@ -151,6 +166,7 @@ onMounted(() => {
   window.addEventListener('resize', resize)
   animId = requestAnimationFrame(animate)
   requestAnimationFrame(() => { isVisible.value = true })
+  fetchLanUrl()
 })
 
 onBeforeUnmount(() => {
@@ -209,6 +225,20 @@ onBeforeUnmount(() => {
             <h3 class="feature-title">{{ f.title }}</h3>
             <p class="feature-desc">{{ f.desc }}</p>
           </div>
+        </div>
+      </section>
+
+      <!-- ===== Multi-device QR ===== -->
+      <section v-if="qrVisible" class="qr-section">
+        <h2 class="section-title">📱 手机扫码打开</h2>
+        <p class="qr-desc">手机和电脑连同一 WiFi，扫码在手机上打开。用手机摄像头对话，电脑处理 AI。</p>
+        <div class="qr-wrapper">
+          <img
+            class="qr-img"
+            :src="`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(lanUrl)}`"
+            alt="手机扫码访问"
+          />
+          <span class="qr-url">{{ lanUrl }}</span>
         </div>
       </section>
 
@@ -440,6 +470,50 @@ onBeforeUnmount(() => {
   color: var(--ink-muted);
   margin: 0;
   line-height: 1.7;
+}
+
+/* ===== QR Section ===== */
+.qr-section {
+  text-align: center;
+  padding: 0 24px 60px;
+  max-width: 960px;
+  margin: 0 auto;
+  animation: feature-rise 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation-delay: 1.0s;
+  opacity: 0;
+}
+
+.qr-desc {
+  font-size: 14px;
+  color: var(--ink-muted);
+  margin: -16px 0 24px;
+  line-height: 1.6;
+}
+
+.qr-wrapper {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  background: var(--glass-mid);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 0.5px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 20px;
+}
+
+.qr-img {
+  width: 180px;
+  height: 180px;
+  border-radius: 8px;
+}
+
+.qr-url {
+  font-size: 13px;
+  color: var(--ink-soft);
+  font-family: 'Consolas', monospace;
+  word-break: break-all;
 }
 
 /* ===== Bottom ===== */
