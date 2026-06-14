@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .config import settings
 from .routers import ws_router
+from .routers.memory_router import router as memory_router
 
 # 创建 FastAPI 应用
 app = FastAPI(
@@ -29,6 +30,7 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(ws_router.router, prefix="/api", tags=["websocket"])
+app.include_router(memory_router)
 
 # 静态文件服务（前端构建产物）
 static_dir = Path(__file__).parent.parent / "frontend" / "dist"
