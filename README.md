@@ -1,34 +1,51 @@
-# 🌟 StarVisionChat - AI 视觉对话助手
+# 🌟 StarVisionChat — 让 AI 拥有眼睛、耳朵和记忆
 
-一款基于 Web 的 AI 视觉对话应用，能让 AI 实时"看到"摄像头画面、"听到"用户语音，并给予自然流畅的回应。
+> 像人一样看世界、听声音、记住你。融合视觉感知、语音交互与持久记忆的多模态 AI 对话助手。
+
+![技术栈](https://img.shields.io/badge/Vue-3.5-4FC08D?logo=vuedotjs) ![技术栈](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi) ![技术栈](https://img.shields.io/badge/WebSocket-实时通信-ff69b4) ![技术栈](https://img.shields.io/badge/Pinia-2.x-ffd859)
+
+---
 
 ## ✨ 功能特性
 
-- 📷 **摄像头实时画面** - AI 能看到你展示的内容
-- 🎤 **语音交互** - 自然的语音对话体验
-- 🤖 **智能视觉问答** - 指着东西问"这是什么"
-- 💬 **多轮对话** - 支持上下文记忆
-- 💰 **成本可控** - 端云协同，智能降级
+| 模块 | 说明 |
+|------|------|
+| 📷 **实时视觉感知** | 摄像头捕捉 + AI 即时理解画面，所见即所得 |
+| 🎙️ **语音自然对话** | 语音输入 + TTS 播报，无需打字自由交流 |
+| 🧠 **场景智能识别** | 多场景自动切换，从做饭助手到学习陪伴 |
+| 🔌 **多模型自由切换** | MiMo / Qwen-Omni 双引擎，按需选择 |
+| 📝 **持久记忆系统** | AI 记住重要信息与上下文，越用越懂你 |
+| 📊 **用量一目了然** | API 调用、Token 消耗、费用实时透明 |
+| 🎨 **6 套主题** | 暖白 · 纯灰 · 深空 · 薄荷 · 浅海 · 裸粉 |
+
+---
 
 ## 🏗️ 技术架构
 
 ```
-前端 (Vue 3 + Vite)
+前端 (Vue 3 + Vite + Pinia + vue-router)
     ↓ WebSocket
 后端 (FastAPI + Python)
     ↓
-AI 服务 (OpenAI API / 本地 Whisper)
+AI 服务 (MiMo / Qwen-Omni / Whisper / Edge-TTS)
 ```
 
 ### 技术栈
 
 | 层级 | 技术 |
 |------|------|
-| 前端 | Vue 3 + Vite + Element Plus + Pinia |
-| 后端 | FastAPI + WebSocket |
-| 视觉理解 | GPT-4o / GPT-4o-mini |
-| 语音识别 | Whisper (本地) / Whisper API |
-| 语音合成 | Edge-TTS (免费) / OpenAI TTS |
+| 前端框架 | Vue 3 + Vite |
+| UI 组件库 | Element Plus |
+| 状态管理 | Pinia |
+| 路由 | vue-router 4 (Hash 模式) |
+| 通信 | WebSocket 实时双向 |
+| 后端框架 | FastAPI |
+| 视觉理解 | GPT-4o / MiMo / Qwen-Omni |
+| 语音识别 | Whisper (本地) / MiMo ASR |
+| 语音合成 | Edge-TTS / MiMo TTS / Qwen TTS |
+| 数据存储 | SQLite (记忆) + localStorage (配置) |
+
+---
 
 ## 🚀 快速开始
 
@@ -47,13 +64,13 @@ cd StarVisionChat
 
 ### 2. 安装依赖
 
-**后端依赖：**
+**后端：**
 ```bash
 cd backend
 pip install -r requirements.txt
 ```
 
-**前端依赖：**
+**前端：**
 ```bash
 cd frontend
 npm install
@@ -61,12 +78,10 @@ npm install
 
 ### 3. 启动服务
 
-**启动后端（在项目根目录运行）：**
+**启动后端（项目根目录）：**
 ```bash
-# 方式 1：使用启动脚本
 python run.py
-
-# 方式 2：直接运行 uvicorn
+# 或
 python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -76,107 +91,154 @@ cd frontend
 npm run dev
 ```
 
-### 4. 配置 API Key
+### 4. 配置
 
-打开应用后，点击右上角 **⚙️ 设置** 按钮：
-- 输入你的 OpenAI API Key
-- 选择 API Base URL（支持第三方兼容 API）
-- 选择视觉模型和对话模型
-- 选择 TTS 语音
+打开 http://localhost:5173 → 封面页 → 点击"开始探索"进入配置页：
 
-配置会自动保存在浏览器本地，下次打开自动加载。
+- **模型选择**：MiMo 或 Qwen-Omni
+- **API Key**：填入对应模型的 API Key
+- **模型参数**：选择视觉/对话/语音合成模型
 
-> 💡 **提示**：也支持通过 `.env` 文件配置，但前端设置优先级更高。
+配置保存在浏览器本地，下次自动加载。也可通过 `.env` 预设。
 
-### 5. 访问应用
+### 5. 访问
 
-- 前端页面: http://localhost:5173
-- API 文档: http://localhost:8000/docs
-- 健康检查: http://localhost:8000/health
+| 地址 | 说明 |
+|------|------|
+| http://localhost:5173 | 前端应用 |
+| http://localhost:8000/docs | API 文档 |
+| http://localhost:8000/health | 健康检查 |
+
+---
 
 ## 📁 项目结构
 
 ```
 StarVisionChat/
-├── docs/                          # 文档
-│   ├── technical-requirements.md  # 技术需求文档
-│   └── design-document.md        # 设计文档
-├── frontend/                      # 前端 (Vue 3)
+├── frontend/                         # 前端 (Vue 3)
 │   ├── src/
-│   │   ├── components/           # Vue 组件
-│   │   ├── composables/          # 组合式函数
-│   │   ├── stores/               # Pinia 状态管理
-│   │   └── services/             # WebSocket 服务
+│   │   ├── components/              # 页面 & UI 组件
+│   │   │   ├── CoverPage.vue        #   封面宣传页
+│   │   │   ├── ConfigPage.vue       #   配置页（模型选择）
+│   │   │   ├── ImmersiveChat.vue    #   核心对话页
+│   │   │   ├── SettingsPanel.vue    #   设置浮窗
+│   │   │   ├── MemoryPanel.vue      #   记忆管理面板
+│   │   │   ├── CostPanel.vue        #   成本统计
+│   │   │   ├── StatusBar.vue        #   状态栏
+│   │   │   └── ThemeSwitcher.vue    #   主题切换
+│   │   ├── router/                  # 路由配置
+│   │   ├── stores/                  # Pinia 状态
+│   │   │   ├── chatStore.js         #   对话状态
+│   │   │   ├── themeStore.js        #   主题状态
+│   │   │   ├── sessionStore.js      #   会话管理
+│   │   │   └── sceneStore.js        #   场景管理
+│   │   ├── composables/             # 组合式函数
+│   │   │   ├── useCamera.js         #   摄像头控制
+│   │   │   ├── useMicrophone.js     #   麦克风控制
+│   │   │   └── useTTS.js            #   语音合成
+│   │   ├── services/                # WebSocket 服务
+│   │   └── styles/                  # 主题 tokens & 全局样式
 │   └── package.json
-├── backend/                       # 后端 (FastAPI)
-│   ├── main.py                   # 入口
-│   ├── config.py                 # 配置
-│   ├── routers/                  # 路由
-│   ├── services/                 # 服务
-│   ├── models/                   # 数据模型
+├── backend/                          # 后端 (FastAPI)
+│   ├── main.py                      # 应用入口
+│   ├── config.py                    # 配置管理
+│   ├── routers/
+│   │   ├── ws_router.py             #   WebSocket 路由
+│   │   └── memory_router.py         #   记忆 REST API
+│   ├── services/
+│   │   ├── llm_service.py           #   LLM 调用封装
+│   │   ├── qwen_service.py          #   Qwen-Omni 服务
+│   │   ├── memory_service.py        #   记忆存储服务
+│   │   ├── memory_interceptor.py    #   记忆自动提取
+│   │   ├── tool_service.py          #   工具调用框架
+│   │   └── session_manager.py       #   会话管理
+│   ├── tools/                       # 内置工具集
+│   ├── models/                      # 数据模型
 │   └── requirements.txt
-├── .env.example                   # 环境变量示例
+├── docs/                            # 文档
+├── .env.example                     # 环境变量示例
 └── README.md
 ```
 
+---
+
 ## 🔧 配置说明
 
-### 环境变量
+### 环境变量 (`.env`)
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
-| `OPENAI_API_KEY` | OpenAI API Key | - |
-| `OPENAI_BASE_URL` | API 基础 URL | `https://api.openai.com/v1` |
+| `OPENAI_API_KEY` | OpenAI / 兼容 API Key | — |
+| `OPENAI_BASE_URL` | API 基础地址 | `https://api.openai.com/v1` |
 | `VISION_MODEL` | 视觉模型 | `gpt-4o-mini` |
 | `CHAT_MODEL` | 对话模型 | `gpt-4o-mini` |
 | `STT_MODE` | 语音识别模式 | `local` |
 | `TTS_MODE` | 语音合成模式 | `edge` |
-| `FRAME_INTERVAL` | 帧采样间隔(秒) | `2.0` |
 
-### 成本控制
+> 前端配置页设置的参数优先级高于 `.env`。
 
-- **帧采样**: 仅 1-2 FPS，节省 ~90% 视觉 API 调用
-- **本地 Whisper**: STT 完全免费
-- **Edge-TTS**: TTS 完全免费
-- **模型分级**: 简单问题用 mini 模型
+---
 
-## 📝 开发说明
+## 📡 WebSocket 消息协议
 
-### 添加新功能
-
-1. 后端服务: 在 `backend/services/` 添加新服务
-2. WebSocket 消息: 在 `backend/models/schemas.py` 添加新消息类型
-3. 前端组件: 在 `frontend/src/components/` 添加新组件
-
-### WebSocket 消息协议
-
-```javascript
-// 客户端 -> 服务端
-{ type: "video_frame", data: { image: "base64..." } }
-{ type: "audio_chunk", data: { audio: "base64..." } }
+```typescript
+// 客户端 → 服务端
+{ type: "video_frame",       data: { image: "base64..." } }
+{ type: "audio_chunk",       data: { audio: "base64..." } }
 { type: "audio_end" }
-{ type: "text_input", data: { text: "..." } }
+{ type: "text_input",        data: { text: "..." } }
+{ type: "config_update",     data: { api_key, model_provider, ... } }
+{ type: "set_scene",         data: { scene_id: "..." } }
 
-// 服务端 -> 客户端
-{ type: "ai_response", data: { text: "...", is_user: false } }
-{ type: "ai_audio", data: { audio: "base64...", format: "mp3" } }
-{ type: "status", data: { status: "thinking", message: "..." } }
-{ type: "cost_update", data: { vision_calls: 5, ... } }
+// 服务端 → 客户端
+{ type: "ai_response",       data: { text: "...", is_user: false } }
+{ type: "ai_audio",          data: { audio: "base64...", format: "mp3" } }
+{ type: "status",            data: { status: "thinking", message: "..." } }
+{ type: "cost_update",       data: { vision_calls, stt_calls, tokens, ... } }
+{ type: "memory_update",     data: { action: "added", memory: {...} } }
+{ type: "scene_detect",      data: { scene: {...} } }
 ```
 
-## 📄 文档
-
-- [技术需求文档](docs/technical-requirements.md)
-- [设计文档](docs/design-document.md)
+---
 
 ## 📊 成本预估
 
-| 场景 | 无优化 | 优化后 |
-|------|-------|-------|
-| 视觉 API | $18/小时 | $0.5/小时 |
-| STT | $3.6/小时 | $0 (本地) |
-| TTS | $5.4/小时 | $0 (Edge-TTS) |
-| **总计** | **$29/小时** | **$1.3/小时** |
+| 场景 | 无优化 | 优化后 (帧采样 + 本地 STT/TTS) |
+|------|--------|-------------------------------|
+| 视觉 API | ~$18/小时 | ~$0.5/小时 |
+| 语音识别 | ~$3.6/小时 | $0 (本地 Whisper) |
+| 语音合成 | ~$5.4/小时 | $0 (Edge-TTS) |
+| **总计** | **~$29/小时** | **~$1.3/小时** |
+
+---
+
+## 📝 开发
+
+### 添加新功能
+
+1. 后端服务：`backend/services/` 添加服务类
+2. 路由：`backend/routers/` 添加 REST / WebSocket 端点
+3. 前端组件：`frontend/src/components/` 添加 `.vue` 组件
+4. 状态管理：`frontend/src/stores/` 添加 Pinia store
+5. 工具：`backend/tools/` 添加工具函数
+
+### 路由结构
+
+```
+/        → CoverPage   (封面)
+/config  → ConfigPage  (配置)
+/chat    → ImmersiveChat (对话)
+```
+
+已配置用户自动从 `/` 跳转至 `/chat`。
+
+---
+
+## 🎬 Demo 视频
+
+> [待上传至 Bilibili / 云盘，放链接]
+
+---
 
 ## 🤝 贡献
 
