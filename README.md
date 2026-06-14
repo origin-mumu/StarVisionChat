@@ -12,7 +12,7 @@
 
 ## 🎬 Demo 视频
 
-> **Demo 演示视频**：[待上传至 Bilibili 后替换链接]
+> **Demo 演示视频**：[点击观看](https://www.bilibili.com/video/BV1sSJA6NEHa/)
 
 ---
 
