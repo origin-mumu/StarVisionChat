@@ -1,14 +1,57 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
+import {
+  View,
+  Microphone,
+  Connection,
+  Switch,
+  Notebook,
+  DataAnalysis,
+} from '@element-plus/icons-vue'
 
-const emit = defineEmits(['enter'])
+const router = useRouter()
+
+/* ─── Feature cards data ─── */
+const features = [
+  {
+    icon: View,
+    title: '实时视觉感知',
+    desc: '摄像头实时捕捉画面，AI 即时理解眼前的一切，所见即所得。',
+  },
+  {
+    icon: Microphone,
+    title: '语音自然对话',
+    desc: '支持语音输入与 TTS 播报，无需打字，解放双手自由交流。',
+  },
+  {
+    icon: Connection,
+    title: '场景智能识别',
+    desc: '多场景模式自动切换，从做饭助手到学习陪伴，AI 随境而变。',
+  },
+  {
+    icon: Switch,
+    title: '多模型自由切换',
+    desc: '支持 MiMo 与 Qwen 双引擎，按需选择最合适的视觉语言模型。',
+  },
+  {
+    icon: Notebook,
+    title: '持久记忆系统',
+    desc: 'AI 记住重要信息与对话上下文，越用越懂你，体验持续升级。',
+  },
+  {
+    icon: DataAnalysis,
+    title: '用量一目了然',
+    desc: 'API 调用次数、Token 消耗、费用估算实时透明，心中有数。',
+  },
+]
 
 /* ─── Particle canvas ─── */
 const canvasRef = ref(null)
 const isVisible = ref(false)
 let animId = 0
 
-const PARTICLE_COUNT = 120
+const PARTICLE_COUNT = 100
 let particles = []
 let width = 0
 let height = 0
@@ -21,18 +64,22 @@ class CoverParticle {
     this.x = Math.random() * width
     this.y = Math.random() * height
     this.size = Math.random() * 2 + 0.5
-    this.speedX = (Math.random() - 0.5) * 0.3
-    this.speedY = (Math.random() - 0.5) * 0.3
+    this.speedX = (Math.random() - 0.5) * 0.25
+    this.speedY = (Math.random() - 0.5) * 0.25
     this.opacity = Math.random() * 0.5 + 0.1
-    this.pulse = Math.random() * 0.005 + 0.002
+    this.pulse = Math.random() * 0.004 + 0.001
     this.phase = Math.random() * Math.PI * 2
+    this.baseX = this.x
+    this.baseY = this.y
   }
   update(time) {
-    this.x += this.speedX
-    this.y += this.speedY
-    if (this.x < 0 || this.x > width) this.speedX *= -1
-    if (this.y < 0 || this.y > height) this.speedY *= -1
-    this.opacity = 0.15 + Math.sin(time * this.pulse + this.phase) * 0.15
+    this.x = this.baseX + Math.sin(time * this.pulse + this.phase) * 30
+    this.y = this.baseY + Math.cos(time * this.pulse * 0.7 + this.phase) * 30
+    if (this.x < 0) this.x = width
+    if (this.x > width) this.x = 0
+    if (this.y < 0) this.y = height
+    if (this.y > height) this.y = 0
+    this.opacity = 0.12 + Math.sin(time * this.pulse + this.phase) * 0.12
   }
   draw(ctx) {
     ctx.globalAlpha = this.opacity
@@ -65,16 +112,16 @@ function animate(time) {
     p.draw(ctx)
   }
 
-  // Draw connecting lines between nearby particles
+  // Connecting lines
   ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#E85D2A'
-  ctx.lineWidth = 0.3
+  ctx.lineWidth = 0.25
   for (let i = 0; i < particles.length; i++) {
     for (let j = i + 1; j < particles.length; j++) {
       const dx = particles[i].x - particles[j].x
       const dy = particles[i].y - particles[j].y
       const dist = Math.sqrt(dx * dx + dy * dy)
-      if (dist < 120) {
-        ctx.globalAlpha = (1 - dist / 120) * 0.08
+      if (dist < 130) {
+        ctx.globalAlpha = (1 - dist / 130) * 0.06
         ctx.beginPath()
         ctx.moveTo(particles[i].x, particles[i].y)
         ctx.lineTo(particles[j].x, particles[j].y)
@@ -88,7 +135,14 @@ function animate(time) {
 
 function handleEnter() {
   isVisible.value = false
-  setTimeout(() => emit('enter'), 400)
+  const saved = localStorage.getItem('starvisionchat_config')
+  const target = (saved && (() => {
+    try {
+      const config = JSON.parse(saved)
+      return config.configured && config.apiKey
+    } catch { return false }
+  })()) ? '/chat' : '/config'
+  setTimeout(() => router.push(target), 400)
 }
 
 onMounted(() => {
@@ -96,7 +150,6 @@ onMounted(() => {
   particles = Array.from({ length: PARTICLE_COUNT }, () => new CoverParticle())
   window.addEventListener('resize', resize)
   animId = requestAnimationFrame(animate)
-  // Fade in
   requestAnimationFrame(() => { isVisible.value = true })
 })
 
@@ -110,35 +163,69 @@ onBeforeUnmount(() => {
   <div class="cover" :class="{ visible: isVisible }">
     <canvas ref="canvasRef" class="cover-canvas"></canvas>
 
-    <div class="cover-content">
-      <!-- Logo / Brand -->
-      <div class="cover-logo">
-        <div class="logo-glow"></div>
-        <svg class="logo-icon" viewBox="0 0 48 48" fill="none">
-          <circle cx="24" cy="24" r="20" stroke="currentColor" stroke-width="1.5" opacity="0.3" />
-          <circle cx="24" cy="24" r="12" stroke="currentColor" stroke-width="1.5" opacity="0.5" />
-          <circle cx="24" cy="24" r="4" fill="currentColor" />
-          <path d="M24 4 L26 10 L24 8 L22 10 Z" fill="currentColor" opacity="0.6" />
-          <path d="M24 44 L26 38 L24 40 L22 38 Z" fill="currentColor" opacity="0.6" />
-          <path d="M4 24 L10 22 L8 24 L10 26 Z" fill="currentColor" opacity="0.6" />
-          <path d="M44 24 L38 22 L40 24 L38 26 Z" fill="currentColor" opacity="0.6" />
-        </svg>
-      </div>
+    <div class="cover-scroll">
+      <!-- ===== Hero ===== -->
+      <section class="hero-section">
+        <div class="cover-logo">
+          <div class="logo-glow"></div>
+          <div class="logo-ring">
+            <svg viewBox="0 0 64 64" fill="none">
+              <circle cx="32" cy="32" r="28" stroke="currentColor" stroke-width="1" opacity="0.2" />
+              <circle cx="32" cy="32" r="18" stroke="currentColor" stroke-width="1.2" opacity="0.4" />
+              <circle cx="32" cy="32" r="8" fill="currentColor" opacity="0.8" />
+              <path d="M32 4 L34 14 L32 11 L30 14 Z" fill="currentColor" opacity="0.5" />
+              <path d="M32 60 L34 50 L32 53 L30 50 Z" fill="currentColor" opacity="0.5" />
+              <path d="M4 32 L14 30 L11 32 L14 34 Z" fill="currentColor" opacity="0.5" />
+              <path d="M60 32 L50 30 L53 32 L50 34 Z" fill="currentColor" opacity="0.5" />
+            </svg>
+          </div>
+        </div>
 
-      <h1 class="cover-title">StarVision</h1>
-      <p class="cover-subtitle">AI 视觉对话助手</p>
-      <p class="cover-desc">融合视觉感知与自然语言，开启智能对话新体验</p>
+        <h1 class="hero-title">StarVision</h1>
+        <p class="hero-subtitle">AI 视觉对话助手</p>
+        <p class="hero-desc">融合视觉感知 · 语音交互 · 场景智能，开启下一代 AI 对话体验</p>
 
-      <button class="cover-btn" @click="handleEnter">
-        <span>开始体验</span>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M5 12h14M12 5l7 7-7 7" />
-        </svg>
-      </button>
-    </div>
+        <button class="hero-cta" @click="handleEnter">
+          <span>开始探索</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14M12 5l7 7-7 7" />
+          </svg>
+        </button>
+      </section>
 
-    <div class="cover-footer">
-      <span>Powered by GPT-4o & Whisper</span>
+      <!-- ===== Features ===== -->
+      <section class="features-section">
+        <h2 class="section-title">核心能力</h2>
+        <div class="features-grid">
+          <div
+            v-for="(f, i) in features"
+            :key="i"
+            class="feature-card"
+            :style="{ animationDelay: `${0.4 + i * 0.1}s` }"
+          >
+            <span class="feature-icon">
+              <el-icon :size="24"><component :is="f.icon" /></el-icon>
+            </span>
+            <h3 class="feature-title">{{ f.title }}</h3>
+            <p class="feature-desc">{{ f.desc }}</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Bottom CTA ===== -->
+      <section class="bottom-section">
+        <p class="bottom-text">准备好探索 AI 视觉对话的未来了吗？</p>
+        <button class="hero-cta" @click="handleEnter">
+          <span>开始体验</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14M12 5l7 7-7 7" />
+          </svg>
+        </button>
+      </section>
+
+      <footer class="cover-footer">
+        <span>Powered by MiMo · Qwen &nbsp;|&nbsp; 视觉 · 语音 · 智能</span>
+      </footer>
     </div>
   </div>
 </template>
@@ -150,44 +237,46 @@ onBeforeUnmount(() => {
   z-index: 99999;
   background-color: var(--canvas);
   background-image:
-    radial-gradient(circle at 30% 40%, var(--orb-1) 0%, transparent 50%),
-    radial-gradient(circle at 70% 60%, var(--orb-2) 0%, transparent 50%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+    radial-gradient(circle at 25% 20%, var(--orb-1) 0%, transparent 50%),
+    radial-gradient(circle at 75% 80%, var(--orb-2) 0%, transparent 50%);
   opacity: 0;
-  transition: opacity 0.4s ease;
+  transition: opacity 0.5s ease;
 }
 .cover.visible {
   opacity: 1;
 }
 
 .cover-canvas {
-  position: absolute;
+  position: fixed;
   inset: 0;
   pointer-events: none;
+  z-index: 0;
 }
 
-.cover-content {
+.cover-scroll {
   position: relative;
   z-index: 10;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ===== Hero ===== */
+.hero-section {
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
   gap: 20px;
-  animation: cover-rise 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) both;
-  animation-delay: 0.2s;
-}
-
-@keyframes cover-rise {
-  from { opacity: 0; transform: translateY(30px) scale(0.95); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  text-align: center;
 }
 
 .cover-logo {
   position: relative;
-  width: 80px;
-  height: 80px;
+  width: 88px;
+  height: 88px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -196,24 +285,29 @@ onBeforeUnmount(() => {
 
 .logo-glow {
   position: absolute;
-  width: 120px;
-  height: 120px;
+  width: 130px;
+  height: 130px;
   border-radius: 50%;
   background: var(--accent);
-  filter: blur(60px);
-  opacity: 0.15;
-  animation: logo-pulse 3s ease-in-out infinite;
+  filter: blur(70px);
+  opacity: 0.12;
+  animation: logo-pulse 4s ease-in-out infinite;
 }
 
 @keyframes logo-pulse {
-  0%, 100% { opacity: 0.1; transform: scale(1); }
-  50% { opacity: 0.2; transform: scale(1.1); }
+  0%, 100% { opacity: 0.08; transform: scale(1); }
+  50% { opacity: 0.18; transform: scale(1.15); }
 }
 
-.logo-icon {
-  width: 64px;
-  height: 64px;
-  animation: logo-spin 20s linear infinite;
+.logo-ring {
+  position: relative;
+  z-index: 1;
+}
+
+.logo-ring svg {
+  width: 72px;
+  height: 72px;
+  animation: logo-spin 30s linear infinite;
 }
 
 @keyframes logo-spin {
@@ -221,38 +315,37 @@ onBeforeUnmount(() => {
   to { transform: rotate(360deg); }
 }
 
-.cover-title {
-  font-size: clamp(2rem, 5vw, 3rem);
+.hero-title {
+  font-size: clamp(2.4rem, 6vw, 3.6rem);
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   color: var(--ink);
   margin: 0;
-  line-height: 1.2;
+  line-height: 1.15;
 }
 
-.cover-subtitle {
+.hero-subtitle {
   font-size: 18px;
   font-weight: 500;
-  color: var(--ink-soft);
+  color: var(--accent);
   margin: 0;
-  letter-spacing: 0.15em;
+  letter-spacing: 0.18em;
 }
 
-.cover-desc {
+.hero-desc {
   font-size: 14px;
   color: var(--ink-muted);
-  margin: 0;
-  max-width: 360px;
-  text-align: center;
-  line-height: 1.6;
+  margin: 4px 0 0;
+  max-width: 400px;
+  line-height: 1.7;
 }
 
-.cover-btn {
-  margin-top: 24px;
+.hero-cta {
+  margin-top: 12px;
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 14px 40px;
+  gap: 12px;
+  padding: 15px 44px;
   border-radius: 999px;
   border: none;
   background: var(--accent);
@@ -262,37 +355,140 @@ onBeforeUnmount(() => {
   font-family: inherit;
   cursor: pointer;
   box-shadow: var(--shadow-button);
-  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-  letter-spacing: 0.05em;
+  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  letter-spacing: 0.06em;
 }
-.cover-btn:hover {
-  transform: translateY(-3px) scale(1.03);
+.hero-cta:hover {
+  transform: translateY(-3px) scale(1.04);
   box-shadow: var(--shadow-button-hover);
 }
-.cover-btn:active {
-  transform: translateY(0) scale(0.98);
+.hero-cta:active {
+  transform: translateY(0) scale(0.97);
 }
 
+/* ===== Features ===== */
+.features-section {
+  padding: 0 24px 80px;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.section-title {
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 40px;
+  letter-spacing: 0.06em;
+  animation: feature-rise 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation-delay: 0.3s;
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.feature-card {
+  background: var(--glass-mid);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 0.5px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 28px 24px;
+  text-align: center;
+  transition: all 0.3s ease;
+  opacity: 0;
+  transform: translateY(24px);
+  animation: feature-rise 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes feature-rise {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.feature-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-card-hover);
+  border-color: var(--accent);
+}
+
+.feature-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  margin-bottom: 18px;
+}
+
+.feature-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 8px;
+  letter-spacing: 0.03em;
+}
+
+.feature-desc {
+  font-size: 13px;
+  color: var(--ink-muted);
+  margin: 0;
+  line-height: 1.7;
+}
+
+/* ===== Bottom ===== */
+.bottom-section {
+  text-align: center;
+  padding: 0 20px 32px;
+}
+
+.bottom-text {
+  font-size: 15px;
+  color: var(--ink-soft);
+  margin: 0 0 20px;
+}
+
+/* ===== Footer ===== */
 .cover-footer {
-  position: absolute;
-  bottom: 32px;
+  text-align: center;
+  padding: 0 20px 36px;
   font-size: 12px;
   color: var(--ink-muted);
-  letter-spacing: 1px;
-  opacity: 0.6;
+  letter-spacing: 0.8px;
+  opacity: 0.5;
 }
 
-/* Responsive */
+/* ===== Responsive ===== */
 @media (max-width: 768px) {
-  .cover-title {
+  .hero-title {
     font-size: 2rem;
   }
-  .cover-subtitle {
+  .hero-subtitle {
     font-size: 15px;
   }
-  .cover-btn {
-    padding: 12px 32px;
+  .hero-cta {
+    padding: 13px 36px;
     font-size: 15px;
+  }
+
+  .features-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .feature-card {
+    padding: 22px 20px;
+  }
+
+  .section-title {
+    font-size: 18px;
+    margin-bottom: 28px;
   }
 }
 </style>
