@@ -138,6 +138,29 @@ class QwenRealtimeService:
         }
         await self._send_event(event)
 
+    async def cancel_response(self):
+        """取消当前正在生成的回复"""
+        event = {"type": "response.cancel"}
+        await self._send_event(event)
+
+    async def update_instructions(self, instructions: str):
+        """更新系统提示词（场景切换时用）"""
+        event = {
+            "type": "session.update",
+            "session": {
+                "modalities": ["text", "audio"],
+                "voice": settings.QWEN_VOICE,
+                "instructions": instructions,
+                "input_audio_format": "pcm",
+                "output_audio_format": "pcm",
+                "turn_detection": None,
+                "input_audio_transcription": {
+                    "model": "qwen3-asr-flash-realtime"
+                }
+            }
+        }
+        await self._send_event(event)
+
     async def _handle_messages(self):
         """处理服务端返回的事件"""
         try:
