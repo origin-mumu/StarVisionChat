@@ -793,6 +793,16 @@ function handleAIResponse(data) {
       // 自动检测场景切换
       checkAutoSwitch(text);
 
+      // 去重：如果最后一条已经是相同用户文本，跳过
+      const msgs = chatStore.messages;
+      if (msgs.length > 0) {
+        const last = msgs[msgs.length - 1];
+        if (last.isUser && last.text === text) {
+          scrollChat();
+          return;
+        }
+      }
+
       chatStore.addMessage(text, true);
       scrollChat();
     }
@@ -1033,7 +1043,16 @@ function handleMemorySaved(data) {
 }
 
 function typewriterEffect(text) {
-  if (typewriterTimer) clearInterval(typewriterTimer);
+  if (typewriterTimer) {
+    clearInterval(typewriterTimer);
+    typewriterTimer = null;
+    // 清除上一个打字效果产生的空消息（防止残留）
+    const msgs = chatStore.messages;
+    const last = msgs[msgs.length - 1];
+    if (last && !last.isUser && last.text === "") {
+      msgs.pop();
+    }
+  }
 
   // Add empty assistant message
   chatStore.addMessage("", false);
@@ -1104,7 +1123,8 @@ function handleTextSend() {
   // 自动检测场景切换
   checkAutoSwitch(text);
 
-  chatStore.addMessage(text, true);
+  // 由后端回显用户消息（handleAIResponse 中 isUser 处理），前端不再本地添加
+  // 避免语音回显与文本回显不一致导致消息丢失
 
   // 捕获当前摄像头帧，和消息一起发送
   const frame = captureFrame();
@@ -1131,12 +1151,11 @@ function takeSnapshot() {
   if (!isCameraOn.value) return;
   const frame = captureFrame();
   if (!frame) return;
-  // 发送截图分析请求
+  // 发送截图分析请求，由后端回显用户文字
   wsService.send("text_input", {
     text: "请详细描述你看到的画面内容",
     image: frame,
   });
-  chatStore.addMessage("请详细描述你看到的画面内容", true);
   setMode("thinking");
 }
 
@@ -1763,7 +1782,7 @@ watch(videoMain, (isMain) => {
     <div class="top-bar">
       <div class="top-brand">
         <el-icon :size="18" color="var(--accent)"><Star /></el-icon>
-        <span class="top-brand-name">StarVision</span>
+        <span class="top-brand-name">灵眸星视</span>
         <span class="model-badge" :class="modelProvider">
           {{ modelProvider === "qwen" ? "Qwen" : "MiMo" }}
         </span>
@@ -3235,6 +3254,11 @@ watch(videoMain, (isMain) => {
   display: flex;
   gap: 10px;
   max-width: 100%;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--glass-border);
+}
+.msg:last-child {
+  border-bottom: none;
 }
 .msg.user {
   align-self: flex-end;
@@ -3245,8 +3269,8 @@ watch(videoMain, (isMain) => {
 }
 
 .msg-avatar {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: var(--glass-mid);
   display: flex;
@@ -3255,6 +3279,7 @@ watch(videoMain, (isMain) => {
   flex-shrink: 0;
   color: var(--accent);
   font-size: 14px;
+  margin-top: 2px;
 }
 .msg.user .msg-avatar {
   background: var(--accent-soft);
@@ -3262,13 +3287,25 @@ watch(videoMain, (isMain) => {
 
 .msg-body {
   min-width: 0;
+  max-width: 85%;
+}
+
+.msg.user .msg-body {
+  background: var(--accent-soft);
+  padding: 10px 16px;
+  border-radius: 18px 18px 4px 18px;
+}
+.msg.assistant .msg-body {
+  background: var(--glass-mid);
+  padding: 10px 16px;
+  border-radius: 18px 18px 18px 4px;
 }
 
 .msg.user .text {
-  color: var(--ink-soft);
+  color: var(--ink);
   font-size: 14px;
   line-height: 1.6;
-  text-align: right;
+  text-align: left;
 }
 .msg.assistant .text {
   color: var(--ink);

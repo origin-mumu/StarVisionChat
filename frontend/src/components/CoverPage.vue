@@ -1,6 +1,6 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, onBeforeUnmount } from "vue";
+import { useRouter } from "vue-router";
 import {
   View,
   Microphone,
@@ -8,171 +8,180 @@ import {
   Switch,
   Notebook,
   DataAnalysis,
-} from '@element-plus/icons-vue'
+  Iphone,
+} from "@element-plus/icons-vue";
 
-const router = useRouter()
+const router = useRouter();
 
 /* ─── Feature cards data ─── */
 const features = [
   {
     icon: View,
-    title: '实时视觉感知',
-    desc: '摄像头实时捕捉画面，AI 即时理解眼前的一切，所见即所得。',
+    title: "实时视觉感知",
+    desc: "摄像头实时捕捉画面，AI 即时理解眼前的一切，所见即所得。",
   },
   {
     icon: Microphone,
-    title: '语音自然对话',
-    desc: '支持语音输入与 TTS 播报，无需打字，解放双手自由交流。',
+    title: "语音自然对话",
+    desc: "支持语音输入与 TTS 播报，无需打字，解放双手自由交流。",
   },
   {
     icon: Connection,
-    title: '场景智能识别',
-    desc: '多场景模式自动切换，从做饭助手到学习陪伴，AI 随境而变。',
+    title: "场景智能识别",
+    desc: "多场景模式自动切换，从做饭助手到学习陪伴，AI 随境而变。",
   },
   {
     icon: Switch,
-    title: '多模型自由切换',
-    desc: '支持 MiMo 与 Qwen 双引擎，按需选择最合适的视觉语言模型。',
+    title: "多模型自由切换",
+    desc: "支持 MiMo 与 Qwen 双引擎，按需选择最合适的视觉语言模型。",
   },
   {
     icon: Notebook,
-    title: '持久记忆系统',
-    desc: 'AI 记住重要信息与对话上下文，越用越懂你，体验持续升级。',
+    title: "持久记忆系统",
+    desc: "AI 记住重要信息与对话上下文，越用越懂你，体验持续升级。",
   },
   {
     icon: DataAnalysis,
-    title: '用量一目了然',
-    desc: 'API 调用次数、Token 消耗、费用估算实时透明，心中有数。',
+    title: "用量一目了然",
+    desc: "API 调用次数、Token 消耗、费用估算实时透明，心中有数。",
   },
-]
+];
 
 /* ─── Particle canvas ─── */
-const canvasRef = ref(null)
-const isVisible = ref(false)
-let animId = 0
+const canvasRef = ref(null);
+const isVisible = ref(false);
+let animId = 0;
 
-const PARTICLE_COUNT = 100
-let particles = []
-let width = 0
-let height = 0
+const PARTICLE_COUNT = 100;
+let particles = [];
+let width = 0;
+let height = 0;
 
 class CoverParticle {
   constructor() {
-    this.reset()
+    this.reset();
   }
   reset() {
-    this.x = Math.random() * width
-    this.y = Math.random() * height
-    this.size = Math.random() * 2 + 0.5
-    this.speedX = (Math.random() - 0.5) * 0.25
-    this.speedY = (Math.random() - 0.5) * 0.25
-    this.opacity = Math.random() * 0.5 + 0.1
-    this.pulse = Math.random() * 0.004 + 0.001
-    this.phase = Math.random() * Math.PI * 2
-    this.baseX = this.x
-    this.baseY = this.y
+    this.x = Math.random() * width;
+    this.y = Math.random() * height;
+    this.size = Math.random() * 2 + 0.5;
+    this.speedX = (Math.random() - 0.5) * 0.25;
+    this.speedY = (Math.random() - 0.5) * 0.25;
+    this.opacity = Math.random() * 0.5 + 0.1;
+    this.pulse = Math.random() * 0.004 + 0.001;
+    this.phase = Math.random() * Math.PI * 2;
+    this.baseX = this.x;
+    this.baseY = this.y;
   }
   update(time) {
-    this.x = this.baseX + Math.sin(time * this.pulse + this.phase) * 30
-    this.y = this.baseY + Math.cos(time * this.pulse * 0.7 + this.phase) * 30
-    if (this.x < 0) this.x = width
-    if (this.x > width) this.x = 0
-    if (this.y < 0) this.y = height
-    if (this.y > height) this.y = 0
-    this.opacity = 0.12 + Math.sin(time * this.pulse + this.phase) * 0.12
+    this.x = this.baseX + Math.sin(time * this.pulse + this.phase) * 30;
+    this.y = this.baseY + Math.cos(time * this.pulse * 0.7 + this.phase) * 30;
+    if (this.x < 0) this.x = width;
+    if (this.x > width) this.x = 0;
+    if (this.y < 0) this.y = height;
+    if (this.y > height) this.y = 0;
+    this.opacity = 0.12 + Math.sin(time * this.pulse + this.phase) * 0.12;
   }
   draw(ctx) {
-    ctx.globalAlpha = this.opacity
-    ctx.beginPath()
-    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2)
-    ctx.fill()
+    ctx.globalAlpha = this.opacity;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 
 function resize() {
-  const c = canvasRef.value
-  if (!c) return
-  width = window.innerWidth
-  height = window.innerHeight
-  c.width = width
-  c.height = height
+  const c = canvasRef.value;
+  if (!c) return;
+  width = window.innerWidth;
+  height = window.innerHeight;
+  c.width = width;
+  c.height = height;
 }
 
 function animate(time) {
-  const c = canvasRef.value
-  if (!c) return
-  const ctx = c.getContext('2d')
-  if (!ctx) return
+  const c = canvasRef.value;
+  if (!c) return;
+  const ctx = c.getContext("2d");
+  if (!ctx) return;
 
-  ctx.clearRect(0, 0, width, height)
-  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--ink-muted').trim() || '#8A7E74'
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle =
+    getComputedStyle(document.documentElement)
+      .getPropertyValue("--ink-muted")
+      .trim() || "#8A7E74";
 
   for (const p of particles) {
-    p.update(time)
-    p.draw(ctx)
+    p.update(time);
+    p.draw(ctx);
   }
 
   // Connecting lines
-  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#E85D2A'
-  ctx.lineWidth = 0.25
+  ctx.strokeStyle =
+    getComputedStyle(document.documentElement)
+      .getPropertyValue("--accent")
+      .trim() || "#E85D2A";
+  ctx.lineWidth = 0.25;
   for (let i = 0; i < particles.length; i++) {
     for (let j = i + 1; j < particles.length; j++) {
-      const dx = particles[i].x - particles[j].x
-      const dy = particles[i].y - particles[j].y
-      const dist = Math.sqrt(dx * dx + dy * dy)
+      const dx = particles[i].x - particles[j].x;
+      const dy = particles[i].y - particles[j].y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < 130) {
-        ctx.globalAlpha = (1 - dist / 130) * 0.06
-        ctx.beginPath()
-        ctx.moveTo(particles[i].x, particles[i].y)
-        ctx.lineTo(particles[j].x, particles[j].y)
-        ctx.stroke()
+        ctx.globalAlpha = (1 - dist / 130) * 0.06;
+        ctx.beginPath();
+        ctx.moveTo(particles[i].x, particles[i].y);
+        ctx.lineTo(particles[j].x, particles[j].y);
+        ctx.stroke();
       }
     }
   }
 
-  animId = requestAnimationFrame(animate)
+  animId = requestAnimationFrame(animate);
 }
 
 /* ─── Multi-device QR ─── */
-const lanUrl = ref('')
-const qrVisible = ref(false)
+const lanUrl = ref("");
+const qrVisible = ref(false);
 
 async function fetchLanUrl() {
   try {
-    const resp = await fetch('/api/network-info')
-    const data = await resp.json()
-    if (data.lan_ip && data.lan_ip !== '127.0.0.1') {
-      lanUrl.value = data.frontend_url
-      qrVisible.value = true
+    const resp = await fetch("/api/network-info");
+    const data = await resp.json();
+    if (data.lan_ip && data.lan_ip !== "127.0.0.1") {
+      lanUrl.value = data.frontend_url;
+      qrVisible.value = true;
     }
-  } catch { /* LAN info unavailable, hide QR */ }
+  } catch {
+    /* LAN info unavailable, hide QR */
+  }
 }
 
 function handleEnter() {
-  isVisible.value = false
-  const saved = localStorage.getItem('starvisionchat_config')
-  const target = (saved && (() => {
-    try {
-      const config = JSON.parse(saved)
-      return config.configured && config.apiKey
-    } catch { return false }
-  })()) ? '/chat' : '/config'
-  setTimeout(() => router.push(target), 400)
+  isVisible.value = false;
+  setTimeout(() => router.push("/config"), 400);
+}
+
+function scrollDown() {
+  const el = document.querySelector(".features-section");
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 onMounted(() => {
-  resize()
-  particles = Array.from({ length: PARTICLE_COUNT }, () => new CoverParticle())
-  window.addEventListener('resize', resize)
-  animId = requestAnimationFrame(animate)
-  requestAnimationFrame(() => { isVisible.value = true })
-  fetchLanUrl()
-})
+  resize();
+  particles = Array.from({ length: PARTICLE_COUNT }, () => new CoverParticle());
+  window.addEventListener("resize", resize);
+  animId = requestAnimationFrame(animate);
+  requestAnimationFrame(() => {
+    isVisible.value = true;
+  });
+  fetchLanUrl();
+});
 
 onBeforeUnmount(() => {
-  cancelAnimationFrame(animId)
-  window.removeEventListener('resize', resize)
-})
+  cancelAnimationFrame(animId);
+  window.removeEventListener("resize", resize);
+});
 </script>
 
 <template>
@@ -186,27 +195,86 @@ onBeforeUnmount(() => {
           <div class="logo-glow"></div>
           <div class="logo-ring">
             <svg viewBox="0 0 64 64" fill="none">
-              <circle cx="32" cy="32" r="28" stroke="currentColor" stroke-width="1" opacity="0.2" />
-              <circle cx="32" cy="32" r="18" stroke="currentColor" stroke-width="1.2" opacity="0.4" />
+              <circle
+                cx="32"
+                cy="32"
+                r="28"
+                stroke="currentColor"
+                stroke-width="1"
+                opacity="0.2"
+              />
+              <circle
+                cx="32"
+                cy="32"
+                r="18"
+                stroke="currentColor"
+                stroke-width="1.2"
+                opacity="0.4"
+              />
               <circle cx="32" cy="32" r="8" fill="currentColor" opacity="0.8" />
-              <path d="M32 4 L34 14 L32 11 L30 14 Z" fill="currentColor" opacity="0.5" />
-              <path d="M32 60 L34 50 L32 53 L30 50 Z" fill="currentColor" opacity="0.5" />
-              <path d="M4 32 L14 30 L11 32 L14 34 Z" fill="currentColor" opacity="0.5" />
-              <path d="M60 32 L50 30 L53 32 L50 34 Z" fill="currentColor" opacity="0.5" />
+              <path
+                d="M32 4 L34 14 L32 11 L30 14 Z"
+                fill="currentColor"
+                opacity="0.5"
+              />
+              <path
+                d="M32 60 L34 50 L32 53 L30 50 Z"
+                fill="currentColor"
+                opacity="0.5"
+              />
+              <path
+                d="M4 32 L14 30 L11 32 L14 34 Z"
+                fill="currentColor"
+                opacity="0.5"
+              />
+              <path
+                d="M60 32 L50 30 L53 32 L50 34 Z"
+                fill="currentColor"
+                opacity="0.5"
+              />
             </svg>
           </div>
         </div>
 
-        <h1 class="hero-title">StarVision</h1>
-        <p class="hero-subtitle">AI 视觉对话助手</p>
-        <p class="hero-desc">融合视觉感知 · 语音交互 · 场景智能，开启下一代 AI 对话体验</p>
+        <h1 class="hero-title">灵眸星视</h1>
+        <p class="hero-subtitle">你的 AI 视界助理</p>
+        <p class="hero-desc">
+          融合视觉感知 · 语音交互 · 场景智能，开启下一代 AI 视界体验
+        </p>
 
         <button class="hero-cta" @click="handleEnter">
           <span>开始探索</span>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <path d="M5 12h14M12 5l7 7-7 7" />
           </svg>
         </button>
+
+        <!-- Scroll hint -->
+        <div class="scroll-hint" @click="scrollDown">
+          <span class="scroll-text">了解更多</span>
+          <svg
+            class="scroll-arrow"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </div>
       </section>
 
       <!-- ===== Features ===== -->
@@ -230,8 +298,11 @@ onBeforeUnmount(() => {
 
       <!-- ===== Multi-device QR ===== -->
       <section v-if="qrVisible" class="qr-section">
-        <h2 class="section-title">📱 手机扫码打开</h2>
-        <p class="qr-desc">手机和电脑连同一 WiFi，扫码在手机上打开。用手机摄像头对话，电脑处理 AI。</p>
+        <h2 class="section-title"><el-icon :size="22" style="vertical-align:-3px;margin-right:4px"><Iphone /></el-icon> 手机扫码打开</h2>
+        <p class="qr-desc">
+          手机和电脑连同一 WiFi，扫码在手机上打开。用手机摄像头对话，电脑处理
+          AI。
+        </p>
         <div class="qr-wrapper">
           <img
             class="qr-img"
@@ -247,14 +318,25 @@ onBeforeUnmount(() => {
         <p class="bottom-text">准备好探索 AI 视觉对话的未来了吗？</p>
         <button class="hero-cta" @click="handleEnter">
           <span>开始体验</span>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <path d="M5 12h14M12 5l7 7-7 7" />
           </svg>
         </button>
       </section>
 
       <footer class="cover-footer">
-        <span>Powered by MiMo · Qwen &nbsp;|&nbsp; 视觉 · 语音 · 智能</span>
+        <span
+          >Powered by MiMo · Qwen &nbsp;|&nbsp; 灵眸观万物 · 星视见未来</span
+        >
       </footer>
     </div>
   </div>
@@ -293,6 +375,7 @@ onBeforeUnmount(() => {
 
 /* ===== Hero ===== */
 .hero-section {
+  position: relative;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -325,8 +408,15 @@ onBeforeUnmount(() => {
 }
 
 @keyframes logo-pulse {
-  0%, 100% { opacity: 0.08; transform: scale(1); }
-  50% { opacity: 0.18; transform: scale(1.15); }
+  0%,
+  100% {
+    opacity: 0.08;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.18;
+    transform: scale(1.15);
+  }
 }
 
 .logo-ring {
@@ -341,8 +431,12 @@ onBeforeUnmount(() => {
 }
 
 @keyframes logo-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .hero-title {
@@ -396,6 +490,63 @@ onBeforeUnmount(() => {
   transform: translateY(0) scale(0.97);
 }
 
+/* ===== Scroll Hint ===== */
+.scroll-hint {
+  position: absolute;
+  bottom: 36px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  animation: hint-fade-in 0.8s ease both;
+  animation-delay: 2s;
+  opacity: 0;
+}
+
+.scroll-text {
+  font-size: 12px;
+  color: var(--ink-muted);
+  letter-spacing: 0.08em;
+  transition: color 0.3s ease;
+}
+
+.scroll-arrow {
+  color: var(--ink-soft);
+  animation: scroll-bounce 2s ease-in-out infinite;
+  transition: color 0.3s ease;
+}
+
+.scroll-hint:hover .scroll-text,
+.scroll-hint:hover .scroll-arrow {
+  color: var(--accent);
+}
+
+@keyframes scroll-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  50% {
+    transform: translateY(6px);
+    opacity: 1;
+  }
+}
+
+@keyframes hint-fade-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
 /* ===== Features ===== */
 .features-section {
   padding: 0 24px 80px;
@@ -435,8 +586,14 @@ onBeforeUnmount(() => {
 }
 
 @keyframes feature-rise {
-  from { opacity: 0; transform: translateY(24px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .feature-card:hover {
@@ -479,7 +636,7 @@ onBeforeUnmount(() => {
   max-width: 960px;
   margin: 0 auto;
   animation: feature-rise 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
-  animation-delay: 1.0s;
+  animation-delay: 1s;
   opacity: 0;
 }
 
@@ -512,7 +669,7 @@ onBeforeUnmount(() => {
 .qr-url {
   font-size: 13px;
   color: var(--ink-soft);
-  font-family: 'Consolas', monospace;
+  font-family: "Consolas", monospace;
   word-break: break-all;
 }
 

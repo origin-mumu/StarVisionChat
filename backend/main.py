@@ -1,5 +1,5 @@
 """
-StarVisionChat - AI 视觉对话助手
+灵眸星视 - AI 视界助理
 FastAPI 主入口
 """
 from fastapi import FastAPI
@@ -16,7 +16,7 @@ from .routers.memory_router import router as memory_router
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="AI 视觉对话助手 - 能看能听的 AI 对话应用"
+    description="AI 视界助理 - 能看能听能记忆的 AI 生活助理"
 )
 
 # CORS 配置

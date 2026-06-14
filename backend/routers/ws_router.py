@@ -378,6 +378,12 @@ async def process_text(ws: WebSocket, session, text: str, image_base64: str = No
                 "data": {"message": memory_result}
             })
 
+        # 显示用户文字（与语音流程一致，由后端回显）
+        await ws.send_json({
+            "type": MessageType.AI_RESPONSE,
+            "data": {"text": text, "is_user": True, "is_streaming": False}
+        })
+
         session.status = StatusType.THINKING
         await send_status(ws, StatusType.THINKING, "正在思考...")
 
